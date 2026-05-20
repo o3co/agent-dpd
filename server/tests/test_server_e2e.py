@@ -43,74 +43,72 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
     def recv() -> dict:
         assert proc.stdout is not None
         line = proc.stdout.readline().decode()
+        if not line:
+            stderr = proc.stderr.read().decode() if proc.stderr else ""
+            raise RuntimeError(
+                f"Server process closed stdout (likely crashed). stderr:\n{stderr}"
+            )
         return json.loads(line)
 
-    # MCP initialize handshake — client advertises roots capability.
-    send({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {"roots": {"listChanged": False}},
-            "clientInfo": {"name": "e2e-test", "version": "0"},
-        },
-    })
-    init_resp = recv()
-    assert init_resp["id"] == 1
-    assert "result" in init_resp
+    def respond_roots(request_id: int) -> None:
+        send({
+            "jsonrpc": "2.0", "id": request_id,
+            "result": {"roots": [{
+                "uri": f"file://{agent_root}", "name": "fake"
+            }]},
+        })
 
-    send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    def call_tool(call_id: int, name: str, arguments: dict) -> dict:
+        """Send a tools/call and return its parsed result payload."""
+        send({
+            "jsonrpc": "2.0", "id": call_id, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        })
+        while True:
+            m = recv()
+            if m.get("id") == call_id and "result" in m:
+                return json.loads(m["result"]["content"][0]["text"])
+            if m.get("method") == "roots/list":
+                respond_roots(m["id"])
+            else:
+                raise AssertionError(f"unexpected message: {m}")
 
-    # The server does not proactively send roots/list — it calls list_roots()
-    # lazily on the first tool invocation. Go straight to start_session.
+    try:
+        # MCP initialize handshake — client advertises roots capability.
+        send({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"roots": {"listChanged": False}},
+                "clientInfo": {"name": "e2e-test", "version": "0"},
+            },
+        })
+        init_resp = recv()
+        assert init_resp["id"] == 1
+        assert "result" in init_resp
 
-    # Call start_session.
-    send({
-        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "start_session", "arguments": {}},
-    })
-    while True:
-        m = recv()
-        if m.get("id") == 2:
-            session_payload = json.loads(
-                m["result"]["content"][0]["text"]
-            )
-            session_id = session_payload["session_id"]
-            break
-        if m.get("method") == "roots/list":
-            send({
-                "jsonrpc": "2.0", "id": m["id"],
-                "result": {"roots": [{
-                    "uri": f"file://{agent_root}", "name": "fake"
-                }]},
-            })
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
-    assert session_id.startswith("ses_")
+        # start_session → spawn_root → walk_subtree round trip.
+        session_payload = call_tool(2, "start_session", {})
+        session_id = session_payload["session_id"]
+        assert session_id.startswith("ses_")
 
-    # Spawn a root.
-    send({
-        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": "spawn_root", "arguments": {
+        root_payload = call_tool(3, "spawn_root", {
             "session_id": session_id, "topic": "T", "reason": "R",
-        }},
-    })
-    while True:
-        m = recv()
-        if m.get("id") == 3:
-            root_id = json.loads(m["result"]["content"][0]["text"])["root_id"]
-            break
-        if m.get("method") == "roots/list":
-            send({
-                "jsonrpc": "2.0", "id": m["id"],
-                "result": {"roots": [{
-                    "uri": f"file://{agent_root}", "name": "fake"
-                }]},
-            })
+        })
+        root_id = root_payload["root_id"]
+        assert root_id.startswith("root_")
 
-    assert root_id.startswith("root_")
+        walk_payload = call_tool(4, "walk_subtree", {
+            "session_id": session_id, "root_id": root_id,
+        })
+        # Newly spawned root has no children yet.
+        assert walk_payload == {"nodes": []}
 
-    proc.terminate()
-    proc.wait(timeout=5)
-
-    # Side-effect: sqlite was created under PRGP_DATA_DIR.
-    expected = data_dir / str(agent_root).replace("/", "-") / "graph.sqlite"
-    assert expected.exists()
+        # Side-effect: sqlite was created under PRGP_DATA_DIR.
+        expected = data_dir / str(agent_root).replace("/", "-") / "graph.sqlite"
+        assert expected.exists()
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
