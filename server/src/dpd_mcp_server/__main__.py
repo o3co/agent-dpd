@@ -1,4 +1,4 @@
-"""Allow `python -m prgp_mcp_server`."""
+"""Allow `python -m dpd_mcp_server`."""
 
 from .server import cli
 

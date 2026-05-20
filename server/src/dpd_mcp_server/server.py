@@ -1,4 +1,4 @@
-"""MCP server wiring: register the 7 PRGP tools over stdio."""
+"""MCP server wiring: register the 7 DPD tools over stdio."""
 
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ logging.basicConfig(
     stream=sys.stderr,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-log = logging.getLogger("prgp-server")
+log = logging.getLogger("dpd-server")
 
-app = Server("prgp-mcp-server")
+app = Server("dpd-mcp-server")
 
 _storages: dict[str, Storage] = {}
 
@@ -36,10 +36,10 @@ def _now_iso() -> str:
 
 
 def _data_dir() -> Path:
-    override = os.environ.get("PRGP_DATA_DIR")
+    override = os.environ.get("DPD_DATA_DIR")
     if override:
         return Path(override)
-    return Path.home() / ".claude" / "prgp-server" / "data"
+    return Path.home() / ".claude" / "dpd-server" / "data"
 
 
 async def _get_storage(arguments: dict) -> Storage:
@@ -81,7 +81,7 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="start_session",
             title="Start session",
-            description="Begin a new PRGP session. Returns session_id.",
+            description="Begin a new DPD session. Returns session_id.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -247,11 +247,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 async def main() -> None:
-    log.info("PRGP server starting (stdio transport)")
+    log.info("DPD server starting (stdio transport)")
     async with stdio_server() as (read, write):
         await app.run(read, write, app.create_initialization_options())
 
 
 def cli() -> None:
-    """Entry point for the `prgp-mcp-server` console script."""
+    """Entry point for the `dpd-mcp-server` console script."""
     anyio.run(main)

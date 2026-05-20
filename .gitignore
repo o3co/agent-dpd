@@ -15,7 +15,7 @@ build/
 .idea/
 .vscode/
 
-# Local sqlite (the live PRGP DB lives in ~/.claude/prgp-server/data/, never the repo)
+# Local sqlite (the live DPD DB lives in ~/.claude/dpd-server/data/, never the repo)
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal

@@ -3,7 +3,7 @@
 Per spec §6.3 + §6.5: the MCP `roots/list` request returns the agent
 scope root (not sub-scopes). This module locates the agent scope and
 encodes its absolute path into the per-machine sqlite directory name
-used under `~/.claude/prgp-server/data/`.
+used under `~/.claude/dpd-server/data/`.
 """
 
 from __future__ import annotations

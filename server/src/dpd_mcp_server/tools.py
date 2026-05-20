@@ -1,4 +1,4 @@
-"""Business logic for each MCP tool exposed by the PRGP server.
+"""Business logic for each MCP tool exposed by the DPD server.
 
 These functions are pure-ish: they take a `Storage`, a `now` timestamp,
 and a `new_id` factory, plus the raw `arguments` dict from MCP. The

@@ -1,6 +1,6 @@
-# prgp / skill — Claude Code skill
+# dpd / skill — Claude Code skill
 
-PRGP skill — conversational UX for the graph protocol. Detects sub-scope from cwd, manages session resume UX, renders graph state inline, and proxies user intent into MCP tool calls.
+DPD skill — conversational UX for the graph protocol. Detects sub-scope from cwd, manages session resume UX, renders graph state inline, and proxies user intent into MCP tool calls.
 
 Phase 2 scope (after `server/` Phase 1 is functional): startup sequence (cwd → sub-scope → list_sessions → user confirm → resume/start), base dialogue loop, render templates.
 

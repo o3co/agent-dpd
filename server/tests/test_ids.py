@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from prgp_mcp_server.ids import new_id
+from dpd_mcp_server.ids import new_id
 
 
 def test_new_id_uses_prefix_and_12_hex_chars() -> None:

@@ -1,4 +1,4 @@
--- PRGP server schema (Phase 1).
+-- DPD server schema (Phase 1).
 -- See spec §3 (Data Model) and §5 (Storage Architecture).
 
 -- NOTE: PRAGMA foreign_keys is a per-connection toggle; this line has no

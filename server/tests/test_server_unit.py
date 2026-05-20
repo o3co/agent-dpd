@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from prgp_mcp_server import server
+from dpd_mcp_server import server
 
 
 @pytest.mark.asyncio
 async def test_get_storage_uses_explicit_override(tmp_path, monkeypatch):
-    monkeypatch.setenv("PRGP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DPD_DATA_DIR", str(tmp_path))
     # Reset cache between tests.
     server._storages.clear()
 
@@ -21,7 +21,7 @@ async def test_get_storage_uses_explicit_override(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_storage_caches_per_scope(tmp_path, monkeypatch):
-    monkeypatch.setenv("PRGP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DPD_DATA_DIR", str(tmp_path))
     server._storages.clear()
 
     s1 = await server._get_storage({"agent_scope": "scope-a"})

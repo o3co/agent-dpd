@@ -1,4 +1,4 @@
-"""SQLite storage layer for PRGP server.
+"""SQLite storage layer for DPD server.
 
 Owns the sqlite connection lifecycle and exposes CRUD primitives.
 Tools never construct SQL directly — they call methods here.
@@ -26,7 +26,7 @@ class Storage:
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
             conn.execute("PRAGMA journal_mode = WAL")
-            schema = files("prgp_mcp_server").joinpath("schema.sql").read_text()
+            schema = files("dpd_mcp_server").joinpath("schema.sql").read_text()
             conn.executescript(schema)
         return cls(db_path)
 
@@ -211,7 +211,7 @@ class Storage:
         """Return all descendants of a root, depth-first pre-order.
 
         Iterative DFS to avoid Python recursion limit on deep chains
-        (sys.getrecursionlimit() defaults to ~1000; PRGP chains can exceed).
+        (sys.getrecursionlimit() defaults to ~1000; DPD chains can exceed).
         Children at each level are ordered by (created_at, id).
         """
         # Each frontier entry is either:

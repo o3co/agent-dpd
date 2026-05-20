@@ -19,15 +19,15 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
     (agent_root / "AGENTS.md").write_text("# marker")
 
     # Override the data dir via env var so the test does not touch ~/.claude.
-    data_dir = tmp_path / "prgp-data"
+    data_dir = tmp_path / "dpd-data"
     env = {
-        "PRGP_DATA_DIR": str(data_dir),
+        "DPD_DATA_DIR": str(data_dir),
         "PATH": "/usr/bin:/bin",
         "HOME": str(tmp_path),
     }
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "prgp_mcp_server"],
+        [sys.executable, "-m", "dpd_mcp_server"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -106,7 +106,7 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
         # Newly spawned root has no children yet.
         assert walk_payload == {"nodes": []}
 
-        # Side-effect: sqlite was created under PRGP_DATA_DIR.
+        # Side-effect: sqlite was created under DPD_DATA_DIR.
         expected = data_dir / str(agent_root).replace("/", "-") / "graph.sqlite"
         assert expected.exists()
     finally:

@@ -1,11 +1,11 @@
-"""Tests for prgp_mcp_server.tools (business logic of each MCP tool)."""
+"""Tests for dpd_mcp_server.tools (business logic of each MCP tool)."""
 
 from __future__ import annotations
 
 import pytest
 
-from prgp_mcp_server.storage import Storage
-from prgp_mcp_server.tools import (
+from dpd_mcp_server.storage import Storage
+from dpd_mcp_server.tools import (
     add_node,
     close_node,
     get_node,
@@ -24,7 +24,7 @@ def storage(tmp_db_path: str) -> Storage:
 def test_start_session_returns_new_id_and_persists(storage: Storage) -> None:
     result = start_session(
         storage=storage,
-        arguments={"scope": "problem-graph.protocol", "label": "exp"},
+        arguments={"scope": "decompose-propagate.protocol", "label": "exp"},
         now="2026-05-20T10:00:00Z",
         new_id=lambda prefix: f"{prefix}_fixed",
     )
@@ -32,7 +32,7 @@ def test_start_session_returns_new_id_and_persists(storage: Storage) -> None:
     assert result == {"session_id": "ses_fixed"}
 
     row = storage.get_session(session_id="ses_fixed")
-    assert row["scope"] == "problem-graph.protocol"
+    assert row["scope"] == "decompose-propagate.protocol"
     assert row["label"] == "exp"
 
 

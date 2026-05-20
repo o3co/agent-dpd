@@ -1,4 +1,4 @@
-"""Tests for prgp_mcp_server.storage."""
+"""Tests for dpd_mcp_server.storage."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from prgp_mcp_server.storage import Storage
+from dpd_mcp_server.storage import Storage
 
 
 def test_open_creates_required_tables(tmp_db_path: str) -> None:
@@ -34,13 +34,13 @@ def test_insert_session_round_trips_through_get(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     storage.insert_session(
         session_id="ses_abc",
-        scope="problem-graph.protocol",
+        scope="decompose-propagate.protocol",
         label="exploration",
         now="2026-05-20T10:00:00Z",
     )
 
     row = storage.get_session(session_id="ses_abc")
-    assert row["scope"] == "problem-graph.protocol"
+    assert row["scope"] == "decompose-propagate.protocol"
     assert row["label"] == "exploration"
     assert row["started_at"] == "2026-05-20T10:00:00Z"
     assert row["updated_at"] == "2026-05-20T10:00:00Z"

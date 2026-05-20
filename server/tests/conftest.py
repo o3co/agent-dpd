@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for prgp_mcp_server tests."""
+"""Shared pytest fixtures for dpd_mcp_server tests."""
 
 from __future__ import annotations
 

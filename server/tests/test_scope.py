@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from prgp_mcp_server.scope import (
+from dpd_mcp_server.scope import (
     AgentScopeResolutionError,
     encode_agent_scope_path,
     resolve_agent_scope,
