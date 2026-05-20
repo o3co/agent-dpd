@@ -65,19 +65,14 @@ def add_node(
     node_type = _required(arguments, "type")
     text = _required(arguments, "text")
 
-    parent_kind = _classify_parent(
-        storage=storage, session_id=session_id, parent_id=parent_id
-    )
-
     node_id = new_id("node")
     try:
-        storage.insert_node(
+        storage.insert_node_under_parent(
             node_id=node_id,
             session_id=session_id,
             node_type=node_type,
             text=text,
             parent_id=parent_id,
-            parent_kind=parent_kind,
             now=now,
         )
     except sqlite3.IntegrityError as exc:
@@ -154,25 +149,6 @@ def _required(arguments: dict[str, Any], key: str) -> Any:
     if value is None or value == "":
         raise ValueError(f"missing required argument: {key}")
     return value
-
-
-def _classify_parent(
-    *, storage: Storage, session_id: str, parent_id: str
-) -> str:
-    with storage.connect() as conn:
-        if conn.execute(
-            "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
-            (session_id, parent_id),
-        ).fetchone():
-            return "root"
-        if conn.execute(
-            "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
-            (session_id, parent_id),
-        ).fetchone():
-            return "node"
-    raise ValueError(
-        f"parent_id {parent_id!r} not found in session {session_id!r}"
-    )
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:

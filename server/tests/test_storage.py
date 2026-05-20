@@ -226,6 +226,41 @@ def test_walk_subtree_handles_deep_chain(tmp_db_path: str) -> None:
     assert nodes[-1]["id"] == f"n{depth - 1:04d}"
 
 
+def test_insert_node_under_parent_atomic_classify(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+
+    parent_kind = storage.insert_node_under_parent(
+        node_id="q1", session_id="ses_1",
+        node_type="question", text="?",
+        parent_id="root_a", now="2026-05-20T10:00:00Z",
+    )
+
+    assert parent_kind == "root"
+    row = storage.get_node(session_id="ses_1", node_id="q1")
+    assert row["parent_kind"] == "root"
+
+
+def test_insert_node_under_parent_raises_when_parent_missing(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+
+    with pytest.raises(ValueError):
+        storage.insert_node_under_parent(
+            node_id="x", session_id="ses_1",
+            node_type="question", text="?",
+            parent_id="missing", now="2026-05-20T10:00:00Z",
+        )
+
+
 def test_insert_node_rejects_invalid_type_at_storage_layer(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     storage.insert_session(

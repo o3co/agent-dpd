@@ -128,6 +128,52 @@ class Storage:
                  parent_id, parent_kind, now, now),
             )
 
+    def insert_node_under_parent(
+        self,
+        *,
+        node_id: str,
+        session_id: str,
+        node_type: str,
+        text: str,
+        parent_id: str,
+        now: str,
+    ) -> str:
+        """Insert a node, atomically classifying its parent kind.
+
+        Returns the parent_kind that was determined ('root' or 'node').
+        Raises ValueError if the parent does not exist in this session.
+
+        Classify-and-insert run in a single transaction so a concurrent
+        delete between the lookup and the insert cannot create an orphan.
+        """
+        with self.connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                (session_id, parent_id),
+            ).fetchone():
+                parent_kind = "root"
+            elif conn.execute(
+                "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
+                (session_id, parent_id),
+            ).fetchone():
+                parent_kind = "node"
+            else:
+                raise ValueError(
+                    f"parent_id {parent_id!r} not found in session {session_id!r}"
+                )
+
+            conn.execute(
+                """
+                INSERT INTO nodes
+                    (id, session_id, type, text, status, closure_reason,
+                     parent_id, parent_kind, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?)
+                """,
+                (node_id, session_id, node_type, text,
+                 parent_id, parent_kind, now, now),
+            )
+            return parent_kind
+
     def get_node(
         self, *, session_id: str, node_id: str
     ) -> sqlite3.Row | None:
