@@ -1091,6 +1091,44 @@ def test_list_unblocked_open_nodes_respects_custom_blocker_edge_type(tmp_db_path
     assert [r["id"] for r in rows] == ["n2"]
 
 
+def test_list_unblocked_open_nodes_treats_active_root_as_blocker(tmp_db_path: str) -> None:
+    """Active roots can serve as blockers (active root counts the same as
+    open node from the blocked-set perspective)."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    # root_a (lifecycle=active) blocks n2 — n2 should NOT appear in unblocked.
+    storage.add_edge(
+        session_id="ses_1", from_node="root_a", to_node="n2",
+        edge_type="blocks", reason=None,
+        now="2026-05-20T10:03:00Z",
+    )
+
+    rows = storage.list_unblocked_open_nodes(session_id="ses_1")
+
+    assert "n2" not in {r["id"] for r in rows}
+
+
+def test_list_unblocked_open_nodes_treats_archived_root_as_unblocked(tmp_db_path: str) -> None:
+    """An archived root no longer blocks. Closing the root branches via
+    set_root_lifecycle('archived') must release nodes it was blocking."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    storage.add_edge(
+        session_id="ses_1", from_node="root_a", to_node="n2",
+        edge_type="blocks", reason=None,
+        now="2026-05-20T10:03:00Z",
+    )
+    # Archive the blocker root.
+    storage.set_root_lifecycle(
+        session_id="ses_1", root_id="root_a",
+        lifecycle="archived", now="2026-05-20T11:00:00Z",
+    )
+
+    rows = storage.list_unblocked_open_nodes(session_id="ses_1")
+
+    assert "n2" in {r["id"] for r in rows}
+
+
 def test_list_unblocked_open_nodes_restricted_to_root(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     _seed_two_endpoints(storage)

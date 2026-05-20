@@ -509,16 +509,15 @@ class Storage:
         root_id: str | None = None,
         blocker_edge_type: str = "blocks",
     ) -> list[sqlite3.Row]:
-        """Return open nodes that no *open node* is blocking via the given
-        edge type (directional convention: edge.from blocks edge.to).
+        """Return open nodes that no still-live endpoint is blocking via the
+        given edge type (directional convention: edge.from blocks edge.to).
+
+        A "live endpoint" is either a node with ``status='open'`` or a root
+        with ``lifecycle='active'``. Roots and nodes are treated symmetrically
+        as blocker candidates so users can express dependencies from either.
 
         ``blocker_edge_type`` defaults to ``"blocks"`` but is overridable so a
         caller using a different vocabulary (e.g., ``"requires"``) can opt in.
-
-        Limitation: only **nodes** count as blockers. A root with an outgoing
-        blocker edge is currently ignored (roots have lifecycle, not status,
-        so "open root" is not directly comparable). Skill side may add stricter
-        semantics on top.
         """
         candidates = self.list_open_nodes(session_id=session_id, root_id=root_id)
         if not candidates:
@@ -528,12 +527,22 @@ class Storage:
                 """
                 SELECT DISTINCT e.to_node
                 FROM edges e
-                JOIN nodes blocker
-                  ON blocker.id = e.from_node
-                 AND blocker.session_id = e.session_id
                 WHERE e.session_id = ?
                   AND e.type = ?
-                  AND blocker.status = 'open'
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM nodes n
+                          WHERE n.session_id = e.session_id
+                            AND n.id = e.from_node
+                            AND n.status = 'open'
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM roots r
+                          WHERE r.session_id = e.session_id
+                            AND r.id = e.from_node
+                            AND r.lifecycle = 'active'
+                      )
+                  )
                 """,
                 (session_id, blocker_edge_type),
             ).fetchall()

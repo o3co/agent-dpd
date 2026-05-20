@@ -432,10 +432,12 @@ def export_yaml(
     storage: Storage,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """Render session + tree + edges as JSON (which is a valid YAML subset).
+    """Render session + tree + edges as JSON-compatible YAML.
 
-    Caller can ``json.loads`` the output back into a dict for round-trip,
-    or paste it into a YAML reader for display.
+    Output is produced via ``json.dumps`` and is parseable by most YAML
+    readers (JSON is a strict subset of YAML 1.2; some YAML 1.1 parsers
+    handle a few edge cases differently, but the data we emit avoids them).
+    Caller can ``json.loads`` the output back into a dict for round-trip.
     """
     import json as _json
 
