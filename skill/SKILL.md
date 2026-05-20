@@ -33,15 +33,21 @@ claude mcp add dpd-mcp-server -- dpd-mcp-server
 
 ## Startup sequence (spec §8.3)
 
-### 1. Detect sub-scope from cwd
+### 1. Detect sub-scope
 
-Walk up from cwd to find the nearest `scope.yaml`. Read its declared `name:` field — that is the sub-scope identifier (NOT the directory basename, which may differ from the declared name). If no `scope.yaml` ancestor exists, sub-scope = null (top-level).
+Resolve in this priority (first match wins):
+
+1. **Explicit `--scope=<name>` argument**: when the user invokes `/dpd --scope=<name>`, use that verbatim. This is the most reliable signal — use it whenever provided.
+2. **cwd walk-up to `scope.yaml`**: from cwd, walk parents looking for `scope.yaml`. Read its declared `name:` field (NOT the directory basename, which may differ).
+3. **Fallback**: sub-scope = null (top-level session).
+
+The override priority matters: when claude is launched from a workspace **above** the sub-scope (e.g., `/Volumes/Workspace/scopes/mcp/` while wanting to work in `decompose-propagate.protocol`), walk-up alone returns null and silently routes the work to top-level. Always check for an explicit `--scope=` first.
 
 ```bash
+# walk-up implementation (only when explicit override absent)
 dir="$(pwd)"
 while [ "$dir" != "/" ]; do
   if [ -f "$dir/scope.yaml" ]; then
-    # Extract the declared scope name. Falls back to dir basename if `name:` missing.
     name=$(grep -E '^name:[[:space:]]*' "$dir/scope.yaml" | head -1 \
              | sed 's/^name:[[:space:]]*//; s/[[:space:]]*$//')
     echo "${name:-$(basename "$dir")}"
@@ -50,8 +56,6 @@ while [ "$dir" != "/" ]; do
   dir="$(dirname "$dir")"
 done
 ```
-
-User override: if the user passes `/dpd --scope=<name>`, use that verbatim instead of cwd walk-up.
 
 ### 2. List existing sessions
 
@@ -84,15 +88,20 @@ active_roots: [<{id, topic, lifecycle}, ...>]
 Each user turn:
 
 1. Identify graph operations implied by the user's message.
-2. Issue MCP tool calls in serial.
+2. Issue MCP tool calls (parallel when independent, serial when ordered).
 3. Render a concise summary of the diff (not raw JSON).
 
-Typical operations:
+Common idioms:
 
-- New topic from scratch → `spawn_root(topic=...)`
-- Child under existing parent → `add_node(parent_id, type, text)`
-- Mark resolved → `close_node(node_id, closure_reason)`
-- Inspect → `get_node`, `walk_subtree`, `list_active_roots`
+- **New topic** → `spawn_root(topic=...)` (returns the full root row, no extra fetch needed)
+- **Child under parent** → `add_node(parent_id, type, text)` (returns the full node row)
+- **Pick from N hypothesis options (atomic)** → `accept_hypothesis(hyp_id, decision_text, rationale_text?)`. This is the **preferred closure path** for select-from-N decisions: it closes the chosen hypothesis as resolved, siblings as rejected, and inserts decision + rationale in a single transaction. Replaces the 5+ separate calls of the old close-each-individually pattern.
+- **Mark a single node resolved** → `close_node(node_id, closure_reason)` for cases that aren't a hypothesis selection (e.g., closing an answer / verification / evidence).
+- **Set focus for resume context** → `set_focus(node_id)` after a meaningful turn so the next session resumes pointed at the right place. Pass `node_id=null` to clear focus.
+- **Retire a finished root** → `set_root_lifecycle(root_id, "archived")` once all the discussion under it is closed and you don't want it cluttering `list_active_roots`.
+- **Pick next thing to work on (next_focus)** → `list_open_nodes(root_id=<recency-ranked root>)`, then pick the deepest open node.
+- **Express cross-node relations** → `add_edge(from_node, to_node, type, reason?)` for `requires` / `blocks` / `derived_from` style links that don't fit the parent-child tree.
+- **Inspect** → `get_node` / `walk_subtree` / `list_active_roots` / `list_edges`.
 
 ## Node type vocabulary (spec §2.2)
 
@@ -104,7 +113,18 @@ The server enforces these via CHECK constraint. Pick the type that best fits the
 | **Solution (close-flavor)** | `answer`, `action`, `verification`, `decision`, `resolution` |
 | **Support** | `evidence`, `constraint`, `assumption`, `rationale`, `risk` |
 
-`closure_reason` is one of `resolved` / `rejected` / `invalidated`.
+`closure_reason` is one of `resolved` / `rejected` / `invalidated`. Per-type intent:
+
+| Type group | `resolved` | `rejected` | `invalidated` |
+|---|---|---|---|
+| `hypothesis` | adopted as decision | ruled out (sibling of accepted) | later found incoherent |
+| `decision` / `answer` / `resolution` | final | (rarely applicable) | revoked / superseded |
+| `question` / `plan` / `goal` / `problem` | the open thread is closed (answered / done) | abandoned without answer | the question itself was malformed |
+| `evidence` / `rationale` / `constraint` / `assumption` | articulated and stands | (rarely applicable) | later found incorrect |
+| `verification` / `action` | done | abandoned | later invalidated by new info |
+| `risk` | mitigated / accepted | rejected (no longer a risk) | re-evaluated as different risk |
+
+The `accept_hypothesis` tool encodes the most common closure pattern: target = `resolved`, siblings = `rejected`. Use `close_node` for everything else.
 
 ## Tool reference (`dpd-mcp-server`)
 
@@ -113,9 +133,15 @@ The server enforces these via CHECK constraint. Pick the type that best fits the
 | `start_session(scope?, label?)` | Begin new session, returns `session_id` |
 | `list_sessions(scope?)` | List sessions for sub-scope (most recent first) |
 | `get_session_state(session_id)` | Session + active_roots + focus_node |
-| `spawn_root(session_id, topic, reason?)` | Create new root topic |
-| `add_node(session_id, parent_id, type, text)` | Add child node under root or node |
+| `spawn_root(session_id, topic, reason?)` | Create new root topic → `{root: {...}}` (full row) |
+| `add_node(session_id, parent_id, type, text)` | Add child node under root or node → `{node: {...}}` (full row) |
 | `close_node(session_id, node_id, closure_reason)` | Mark resolved/rejected/invalidated |
+| `accept_hypothesis(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + insert rationale (if any) |
+| `set_focus(session_id, node_id?)` | Set/clear `focus_node_id`. Pass `node_id=null` to clear |
+| `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred` |
+| `list_open_nodes(session_id, root_id?)` | Open nodes in session (or within one root's subtree) |
+| `add_edge(session_id, from_node, to_node, type, reason?)` | Insert a free-form-typed edge between nodes |
+| `list_edges(session_id, from_node?)` | List edges (optionally filtered by from_node) |
 | `get_node(session_id, node_id)` | Fetch single node |
 | `walk_subtree(session_id, root_id)` | All descendants of root (pre-order) |
 | `list_active_roots(session_id)` | Roots with lifecycle=active |
