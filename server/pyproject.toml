@@ -24,6 +24,9 @@ prgp-mcp-server = "prgp_mcp_server.server:cli"
 [tool.hatch.build.targets.wheel]
 packages = ["src/prgp_mcp_server"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/prgp_mcp_server/schema.sql" = "prgp_mcp_server/schema.sql"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
