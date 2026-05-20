@@ -158,11 +158,27 @@ class Storage:
     def walk_subtree(
         self, *, session_id: str, root_id: str
     ) -> list[sqlite3.Row]:
-        """Return all descendants of a root, depth-first by creation time."""
+        """Return all descendants of a root, depth-first pre-order.
+
+        Iterative DFS to avoid Python recursion limit on deep chains
+        (sys.getrecursionlimit() defaults to ~1000; PRGP chains can exceed).
+        Children at each level are ordered by (created_at, id).
+        """
+        # Each frontier entry is either:
+        #   ("expand", parent_id, parent_kind)  — fetch children, schedule them
+        #   ("emit",   node_row)                — append this row to result
+        # On pop, "expand" frames fetch children and push, in REVERSE order, a
+        # paired (emit, expand) for each child. This gives pre-order DFS.
         with self.connect() as conn:
             result: list[sqlite3.Row] = []
-
-            def visit(parent_id: str, parent_kind: str) -> None:
+            frontier: list[tuple] = [("expand", root_id, "root")]
+            while frontier:
+                frame = frontier.pop()
+                if frame[0] == "emit":
+                    _, row = frame
+                    result.append(row)
+                    continue
+                _, parent_id, parent_kind = frame
                 children = conn.execute(
                     """
                     SELECT * FROM nodes
@@ -173,9 +189,10 @@ class Storage:
                     """,
                     (session_id, parent_id, parent_kind),
                 ).fetchall()
-                for child in children:
-                    result.append(child)
-                    visit(child["id"], "node")
-
-            visit(root_id, "root")
+                # Push children in REVERSE so first child pops first.
+                # For each child, push (expand, ...) FIRST and (emit, ...) SECOND
+                # so the emit happens BEFORE the expansion — pre-order.
+                for child in reversed(children):
+                    frontier.append(("expand", child["id"], "node"))
+                    frontier.append(("emit", child))
             return result

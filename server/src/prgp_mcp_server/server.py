@@ -146,7 +146,10 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="walk_subtree",
             title="Walk subtree",
-            description="Return all descendants of a root.",
+            description=(
+                "Return all descendants of a root, depth-first by creation time. "
+                "Returns empty list if the session or root does not exist."
+            ),
             inputSchema={
                 "type": "object",
                 "required": ["session_id", "root_id"],
@@ -159,7 +162,10 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="list_active_roots",
             title="List active roots",
-            description="List all roots with lifecycle=active in this session.",
+            description=(
+                "List all roots with lifecycle=active in this session. "
+                "Returns empty list if the session does not exist or has no active roots."
+            ),
             inputSchema={
                 "type": "object",
                 "required": ["session_id"],

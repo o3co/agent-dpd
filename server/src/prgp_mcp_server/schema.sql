@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     type            TEXT NOT NULL,           -- question|answer|plan|action|... (§2.2)
     text            TEXT NOT NULL,
     status          TEXT NOT NULL CHECK (status IN ('open','closed')),
-    closure_reason  TEXT,                    -- nullable: resolved|rejected|invalidated
+    closure_reason  TEXT
+        CHECK (closure_reason IS NULL OR closure_reason IN ('resolved','rejected','invalidated')),
     parent_id       TEXT NOT NULL,           -- references roots(id) OR nodes(id)
     parent_kind     TEXT NOT NULL CHECK (parent_kind IN ('root','node')),
     created_at      TEXT NOT NULL,

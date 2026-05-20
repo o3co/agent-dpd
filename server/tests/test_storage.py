@@ -194,3 +194,60 @@ def test_walk_subtree_returns_descendants_depth_first(tmp_db_path: str) -> None:
     ids = [n["id"] for n in nodes]
 
     assert ids == ["q1", "a1", "q2"]
+
+
+def test_walk_subtree_handles_deep_chain(tmp_db_path: str) -> None:
+    """Regression: previously hit Python's recursion limit at ~1000 deep."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+
+    depth = 2000
+    parent_id = "root_a"
+    parent_kind = "root"
+    for i in range(depth):
+        node_id = f"n{i:04d}"
+        storage.insert_node(
+            node_id=node_id, session_id="ses_1", node_type="question",
+            text=f"node {i}", parent_id=parent_id, parent_kind=parent_kind,
+            now=f"2026-05-20T10:{i // 3600:02d}:{i % 3600:04d}Z",
+        )
+        parent_id = node_id
+        parent_kind = "node"
+
+    nodes = storage.walk_subtree(session_id="ses_1", root_id="root_a")
+    assert len(nodes) == depth
+    assert nodes[0]["id"] == "n0000"
+    assert nodes[-1]["id"] == f"n{depth - 1:04d}"
+
+
+def test_close_node_rejects_invalid_closure_reason_at_storage_layer(
+    tmp_db_path: str,
+) -> None:
+    """The DB-level CHECK constraint enforces closure_reason vocabulary."""
+    import sqlite3 as _sqlite3
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="q1", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:00:00Z",
+    )
+
+    with pytest.raises(_sqlite3.IntegrityError):
+        storage.close_node(
+            session_id="ses_1", node_id="q1",
+            closure_reason="bogus_reason",
+            now="2026-05-20T11:00:00Z",
+        )
