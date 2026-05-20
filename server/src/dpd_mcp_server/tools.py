@@ -288,7 +288,7 @@ def list_unblocked_open_nodes(
     return {"nodes": [_row_to_dict(r) for r in rows]}
 
 
-def accept_hypothesis(
+def resolve_hypothesis_branch(
     *,
     storage: Storage,
     arguments: dict[str, Any],
@@ -311,7 +311,7 @@ def accept_hypothesis(
     rationale_id = new_id("node") if rationale_text is not None else None
 
     try:
-        return storage.accept_hypothesis(
+        return storage.resolve_hypothesis_branch(
             session_id=session_id, hyp_id=hyp_id,
             decision_id=decision_id, decision_text=decision_text,
             rationale_id=rationale_id, rationale_text=rationale_text,
@@ -319,7 +319,7 @@ def accept_hypothesis(
         )
     except sqlite3.IntegrityError as exc:
         raise ValueError(
-            f"accept_hypothesis failed in session {session_id!r}: {exc}"
+            f"resolve_hypothesis_branch failed in session {session_id!r}: {exc}"
         ) from exc
 
 

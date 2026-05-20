@@ -369,7 +369,7 @@ class Storage:
             self._touch_session(conn, session_id=session_id, now=now)
             return cursor.lastrowid
 
-    def accept_hypothesis(
+    def resolve_hypothesis_branch(
         self,
         *,
         session_id: str,
@@ -387,11 +387,15 @@ class Storage:
             2. Close every sibling hypothesis (same parent, type='hypothesis',
                status='open') as 'rejected'.
             3. Insert a closed 'decision' node under the same parent (resolved).
-            4. If rationale_text is given, insert a closed 'rationale' node
+            4. Insert a ``derived_from`` edge from the new decision to the
+               accepted hypothesis, so the structural link between them is
+               queryable (not only textually implied by tree adjacency).
+            5. If rationale_text is given, insert a closed 'rationale' node
                under the decision (resolved).
-            5. Bump sessions.updated_at.
+            6. Bump sessions.updated_at.
 
-        Returns ``{hyp_id, decision_id, rationale_id, closed_siblings}``.
+        Returns ``{hyp_id, decision_id, rationale_id, closed_siblings,
+        derived_from_edge_id}``.
 
         Raises ValueError when the target is missing, not a hypothesis, or
         not currently open (preventing duplicate decisions on retry).
@@ -450,6 +454,14 @@ class Storage:
                  parent_id, parent_kind, now, now),
             )
 
+            edge_cursor = conn.execute(
+                "INSERT INTO edges "
+                "(session_id, from_node, to_node, type, reason, created_at) "
+                "VALUES (?, ?, ?, 'derived_from', NULL, ?)",
+                (session_id, decision_id, hyp_id, now),
+            )
+            derived_from_edge_id = edge_cursor.lastrowid
+
             if rationale_id is not None and rationale_text is not None:
                 conn.execute(
                     "INSERT INTO nodes "
@@ -468,6 +480,7 @@ class Storage:
                 "decision_id": decision_id,
                 "rationale_id": rationale_id,
                 "closed_siblings": closed_siblings,
+                "derived_from_edge_id": derived_from_edge_id,
             }
 
     def list_edges(

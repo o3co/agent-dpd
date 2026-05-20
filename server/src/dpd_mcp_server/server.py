@@ -401,7 +401,7 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name="accept_hypothesis",
+            name="resolve_hypothesis_branch",
             title="Accept hypothesis (atomic decision)",
             description=(
                 "Atomic closure accelerator: closes the chosen hypothesis as resolved, "
@@ -480,8 +480,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.list_unblocked_open_nodes(
             storage=storage, arguments=tool_args
         )
-    if name == "accept_hypothesis":
-        return tools.accept_hypothesis(
+    if name == "resolve_hypothesis_branch":
+        return tools.resolve_hypothesis_branch(
             storage=storage, arguments=tool_args, now=now, new_id=new_id
         )
 

@@ -95,7 +95,7 @@ Common idioms:
 
 - **New topic** → `spawn_root(topic=...)` (returns the full root row, no extra fetch needed)
 - **Child under parent** → `add_node(parent_id, type, text)` (returns the full node row)
-- **Pick from N hypothesis options (atomic)** → `accept_hypothesis(hyp_id, decision_text, rationale_text?)`. This is the **preferred closure path** for select-from-N decisions: it closes the chosen hypothesis as resolved, siblings as rejected, and inserts decision + rationale in a single transaction. Replaces the 5+ separate calls of the old close-each-individually pattern.
+- **Pick from N hypothesis options (atomic)** → `resolve_hypothesis_branch(hyp_id, decision_text, rationale_text?)`. This is the **preferred closure path** for select-from-N decisions: it closes the chosen hypothesis as resolved, siblings as rejected, inserts decision + rationale, **and auto-inserts a `derived_from` edge from the decision to the accepted hypothesis** — all in a single transaction. Replaces the 5+ separate calls of the old close-each-individually pattern.
 - **Mark a single node resolved** → `close_node(node_id, closure_reason)` for cases that aren't a hypothesis selection (e.g., closing an answer / verification / evidence).
 - **Set focus for resume context** → `set_focus(node_id)` after a meaningful turn so the next session resumes pointed at the right place. Pass `node_id=null` to clear focus.
 - **Retire a finished root** → `set_root_lifecycle(root_id, "archived")` once all the discussion under it is closed and you don't want it cluttering `list_active_roots`.
@@ -124,7 +124,7 @@ The server enforces these via CHECK constraint. Pick the type that best fits the
 | `verification` / `action` | done | abandoned | later invalidated by new info |
 | `risk` | mitigated / accepted | rejected (no longer a risk) | re-evaluated as different risk |
 
-The `accept_hypothesis` tool encodes the most common closure pattern: target = `resolved`, siblings = `rejected`. Use `close_node` for everything else.
+The `resolve_hypothesis_branch` tool encodes the most common closure pattern: target = `resolved`, siblings = `rejected`. Use `close_node` for everything else.
 
 ## Tool reference (`dpd-mcp-server`)
 
@@ -136,7 +136,7 @@ The `accept_hypothesis` tool encodes the most common closure pattern: target = `
 | `spawn_root(session_id, topic, reason?)` | Create new root topic → `{root: {...}}` (full row) |
 | `add_node(session_id, parent_id, type, text)` | Add child node under root or node → `{node: {...}}` (full row) |
 | `close_node(session_id, node_id, closure_reason)` | Mark resolved/rejected/invalidated |
-| `accept_hypothesis(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + insert rationale (if any) |
+| `resolve_hypothesis_branch(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + auto-insert `derived_from` edge (decision → accepted hypothesis) + insert rationale (if any) |
 | `set_focus(session_id, node_id?)` | Set/clear `focus_node_id`. Pass `node_id=null` to clear |
 | `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred` |
 | `list_open_nodes(session_id, root_id?)` | Open nodes in session (or within one root's subtree) |

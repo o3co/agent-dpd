@@ -119,7 +119,7 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
         assert state_payload["focus_node"] is None
 
         # Phase 2.5 tool surface: spawn 3 hypotheses under the root, then
-        # use accept_hypothesis to atomically resolve one branch.
+        # use resolve_hypothesis_branch to atomically resolve one branch.
         hyp_ids = []
         for i in range(3):
             payload = call_tool(7 + i, "add_node", {
@@ -128,7 +128,7 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
             })
             hyp_ids.append(payload["node"]["id"])
 
-        accept_payload = call_tool(10, "accept_hypothesis", {
+        accept_payload = call_tool(10, "resolve_hypothesis_branch", {
             "session_id": session_id, "hyp_id": hyp_ids[1],
             "decision_text": "Adopt option 1",
             "rationale_text": "Best fit",
@@ -163,17 +163,27 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
         })
         assert active == {"roots": []}
 
-        # add_edge + list_edges round-trip. Both endpoints must exist in
-        # the session (roots OR nodes accepted). Use the resolved hypothesis
-        # as the to_node and the decision as the from_node.
-        call_tool(16, "add_edge", {
+        # resolve_hypothesis_branch already created a derived_from edge
+        # decision → accepted hypothesis. Verify and add another distinct
+        # edge type to exercise add_edge / list_edges.
+        edges_after_resolve = call_tool(16, "list_edges", {
             "session_id": session_id,
-            "from_node": accept_payload["decision_id"],
-            "to_node": hyp_ids[1], "type": "derived_from",
         })
-        edges = call_tool(17, "list_edges", {"session_id": session_id})
-        assert len(edges["edges"]) == 1
-        assert edges["edges"][0]["type"] == "derived_from"
+        assert len(edges_after_resolve["edges"]) == 1
+        auto_edge = edges_after_resolve["edges"][0]
+        assert auto_edge["type"] == "derived_from"
+        assert auto_edge["from_node"] == accept_payload["decision_id"]
+        assert auto_edge["to_node"] == hyp_ids[1]
+
+        # Add a manual "blocks" edge between two of the still-existing nodes.
+        call_tool(17, "add_edge", {
+            "session_id": session_id,
+            "from_node": hyp_ids[0], "to_node": hyp_ids[2],
+            "type": "blocks",
+        })
+        all_edges = call_tool(18, "list_edges", {"session_id": session_id})
+        assert len(all_edges["edges"]) == 2
+        assert {e["type"] for e in all_edges["edges"]} == {"derived_from", "blocks"}
 
         # Side-effect: sqlite was created under DPD_DATA_DIR.
         expected = data_dir / str(agent_root).replace("/", "-") / "graph.sqlite"

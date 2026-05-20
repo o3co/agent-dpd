@@ -6,7 +6,7 @@ import pytest
 
 from dpd_mcp_server.storage import Storage
 from dpd_mcp_server.tools import (
-    accept_hypothesis,
+    resolve_hypothesis_branch,
     add_edge,
     add_node,
     close_node,
@@ -627,7 +627,7 @@ def test_add_edge_and_list_edges_tools(storage: Storage) -> None:
     assert list_result["edges"][0]["type"] == "derived_from"
 
 
-def test_accept_hypothesis_tool_with_rationale(storage: Storage) -> None:
+def test_resolve_hypothesis_branch_tool_with_rationale(storage: Storage) -> None:
     sid = _start_with_root(storage)
     # Seed 3 hypothesis siblings under root_a
     for nid in ["h1", "h2", "h3"]:
@@ -640,7 +640,7 @@ def test_accept_hypothesis_tool_with_rationale(storage: Storage) -> None:
         )
 
     ids = iter(["d1", "r1"])
-    result = accept_hypothesis(
+    result = resolve_hypothesis_branch(
         storage=storage,
         arguments={
             "session_id": sid, "hyp_id": "h2",
@@ -668,7 +668,7 @@ def test_accept_hypothesis_tool_with_rationale(storage: Storage) -> None:
     assert r1["parent_id"] == "d1"
 
 
-def test_accept_hypothesis_tool_without_rationale(storage: Storage) -> None:
+def test_resolve_hypothesis_branch_tool_without_rationale(storage: Storage) -> None:
     sid = _start_with_root(storage)
     add_node(
         storage=storage,
@@ -679,7 +679,7 @@ def test_accept_hypothesis_tool_without_rationale(storage: Storage) -> None:
     )
 
     ids = iter(["d1"])
-    result = accept_hypothesis(
+    result = resolve_hypothesis_branch(
         storage=storage,
         arguments={"session_id": sid, "hyp_id": "h1",
                    "decision_text": "Adopt h1"},

@@ -834,7 +834,7 @@ def test_get_root_returns_none_when_missing(tmp_db_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2.5: accept_hypothesis (atomic composite)
+# Phase 2.5: resolve_hypothesis_branch (atomic composite)
 # ---------------------------------------------------------------------------
 
 
@@ -855,23 +855,24 @@ def _seed_hypothesis_branch(storage: Storage) -> None:
         )
 
 
-def test_accept_hypothesis_closes_target_resolved_and_siblings_rejected(
+def test_resolve_hypothesis_branch_closes_target_resolved_and_siblings_rejected(
     tmp_db_path: str,
 ) -> None:
     storage = Storage.open(tmp_db_path)
     _seed_hypothesis_branch(storage)
 
-    result = storage.accept_hypothesis(
+    result = storage.resolve_hypothesis_branch(
         session_id="ses_1", hyp_id="h2",
         decision_id="d1", decision_text="adopt h2",
         rationale_id="r1", rationale_text="best fit",
         now="2026-05-20T11:00:00Z",
     )
 
-    assert result == {
-        "hyp_id": "h2", "decision_id": "d1", "rationale_id": "r1",
-        "closed_siblings": ["h1", "h3"],
-    }
+    assert result["hyp_id"] == "h2"
+    assert result["decision_id"] == "d1"
+    assert result["rationale_id"] == "r1"
+    assert result["closed_siblings"] == ["h1", "h3"]
+    assert isinstance(result["derived_from_edge_id"], int)
 
     h2 = storage.get_node(session_id="ses_1", node_id="h2")
     assert h2["status"] == "closed"
@@ -895,11 +896,11 @@ def test_accept_hypothesis_closes_target_resolved_and_siblings_rejected(
     assert r1["parent_kind"] == "node"
 
 
-def test_accept_hypothesis_without_rationale(tmp_db_path: str) -> None:
+def test_resolve_hypothesis_branch_without_rationale(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     _seed_hypothesis_branch(storage)
 
-    result = storage.accept_hypothesis(
+    result = storage.resolve_hypothesis_branch(
         session_id="ses_1", hyp_id="h1",
         decision_id="d1", decision_text="adopt h1",
         rationale_id=None, rationale_text=None,
@@ -910,12 +911,12 @@ def test_accept_hypothesis_without_rationale(tmp_db_path: str) -> None:
     assert storage.get_node(session_id="ses_1", node_id="d1") is not None
 
 
-def test_accept_hypothesis_raises_when_target_missing(tmp_db_path: str) -> None:
+def test_resolve_hypothesis_branch_raises_when_target_missing(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     _seed_hypothesis_branch(storage)
 
     with pytest.raises(ValueError, match="hypothesis"):
-        storage.accept_hypothesis(
+        storage.resolve_hypothesis_branch(
             session_id="ses_1", hyp_id="h_ghost",
             decision_id="d1", decision_text="x",
             rationale_id=None, rationale_text=None,
@@ -923,7 +924,7 @@ def test_accept_hypothesis_raises_when_target_missing(tmp_db_path: str) -> None:
         )
 
 
-def test_accept_hypothesis_rejects_non_hypothesis_target(tmp_db_path: str) -> None:
+def test_resolve_hypothesis_branch_rejects_non_hypothesis_target(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     storage.insert_session(
         session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
@@ -939,7 +940,7 @@ def test_accept_hypothesis_rejects_non_hypothesis_target(tmp_db_path: str) -> No
     )
 
     with pytest.raises(ValueError, match="not 'hypothesis'"):
-        storage.accept_hypothesis(
+        storage.resolve_hypothesis_branch(
             session_id="ses_1", hyp_id="q1",
             decision_id="d1", decision_text="x",
             rationale_id=None, rationale_text=None,
@@ -947,7 +948,7 @@ def test_accept_hypothesis_rejects_non_hypothesis_target(tmp_db_path: str) -> No
         )
 
 
-def test_accept_hypothesis_leaves_closed_siblings_alone(tmp_db_path: str) -> None:
+def test_resolve_hypothesis_branch_leaves_closed_siblings_alone(tmp_db_path: str) -> None:
     """Already-closed sibling hypotheses are not re-closed."""
     storage = Storage.open(tmp_db_path)
     _seed_hypothesis_branch(storage)
@@ -956,7 +957,7 @@ def test_accept_hypothesis_leaves_closed_siblings_alone(tmp_db_path: str) -> Non
         closure_reason="invalidated", now="2026-05-20T10:30:00Z",
     )
 
-    result = storage.accept_hypothesis(
+    result = storage.resolve_hypothesis_branch(
         session_id="ses_1", hyp_id="h2",
         decision_id="d1", decision_text="x",
         rationale_id=None, rationale_text=None,
@@ -1111,13 +1112,34 @@ def test_list_unblocked_open_nodes_restricted_to_root(tmp_db_path: str) -> None:
     assert {r["id"] for r in rows} == {"n1", "n2"}
 
 
-def test_accept_hypothesis_rejects_already_closed_hypothesis(tmp_db_path: str) -> None:
+def test_resolve_hypothesis_branch_creates_derived_from_edge(tmp_db_path: str) -> None:
+    """The decision node should be linked to the accepted hypothesis via a
+    'derived_from' edge automatically (so the source of the decision is
+    structurally discoverable, not just textually implied)."""
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    storage.resolve_hypothesis_branch(
+        session_id="ses_1", hyp_id="h2",
+        decision_id="d1", decision_text="adopt h2",
+        rationale_id=None, rationale_text=None,
+        now="2026-05-20T11:00:00Z",
+    )
+
+    edges = storage.list_edges(session_id="ses_1")
+    assert len(edges) == 1
+    assert edges[0]["from_node"] == "d1"
+    assert edges[0]["to_node"] == "h2"
+    assert edges[0]["type"] == "derived_from"
+
+
+def test_resolve_hypothesis_branch_rejects_already_closed_hypothesis(tmp_db_path: str) -> None:
     """A retry or accidental re-call on a closed hypothesis must fail loud,
     not overwrite closure_reason and create a duplicate decision."""
     storage = Storage.open(tmp_db_path)
     _seed_hypothesis_branch(storage)
     # First accept resolves h1, closes h2/h3 rejected, inserts d1.
-    storage.accept_hypothesis(
+    storage.resolve_hypothesis_branch(
         session_id="ses_1", hyp_id="h1",
         decision_id="d1", decision_text="adopt h1",
         rationale_id=None, rationale_text=None,
@@ -1126,7 +1148,7 @@ def test_accept_hypothesis_rejects_already_closed_hypothesis(tmp_db_path: str) -
 
     # Second call on the same (now-closed) h1 must raise.
     with pytest.raises(ValueError, match="open"):
-        storage.accept_hypothesis(
+        storage.resolve_hypothesis_branch(
             session_id="ses_1", hyp_id="h1",
             decision_id="d2", decision_text="reaccept",
             rationale_id=None, rationale_text=None,
@@ -1135,7 +1157,7 @@ def test_accept_hypothesis_rejects_already_closed_hypothesis(tmp_db_path: str) -
 
     # Equally, a previously-rejected sibling must not be acceptable.
     with pytest.raises(ValueError, match="open"):
-        storage.accept_hypothesis(
+        storage.resolve_hypothesis_branch(
             session_id="ses_1", hyp_id="h2",
             decision_id="d3", decision_text="late switch",
             rationale_id=None, rationale_text=None,
