@@ -597,13 +597,20 @@ def test_list_open_nodes_tool_filtered_by_root(storage: Storage) -> None:
 
 def test_add_edge_and_list_edges_tools(storage: Storage) -> None:
     sid = _start_with_root(storage)
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_a",
+                   "type": "question", "text": "?"},
+        now="2026-05-20T10:01:00Z",
+        new_id=lambda p: "n1",
+    )
 
     add_result = add_edge(
         storage=storage,
         arguments={
             "session_id": sid,
-            "from_node": "node_x", "to_node": "node_y",
-            "type": "requires", "reason": "dep",
+            "from_node": "n1", "to_node": "root_a",
+            "type": "derived_from", "reason": "dep",
         },
         now="2026-05-20T11:00:00Z",
     )
@@ -615,8 +622,9 @@ def test_add_edge_and_list_edges_tools(storage: Storage) -> None:
     )
 
     assert len(list_result["edges"]) == 1
-    assert list_result["edges"][0]["from_node"] == "node_x"
-    assert list_result["edges"][0]["type"] == "requires"
+    assert list_result["edges"][0]["from_node"] == "n1"
+    assert list_result["edges"][0]["to_node"] == "root_a"
+    assert list_result["edges"][0]["type"] == "derived_from"
 
 
 def test_accept_hypothesis_tool_with_rationale(storage: Storage) -> None:

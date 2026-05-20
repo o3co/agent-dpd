@@ -681,15 +681,61 @@ def test_list_open_nodes_restricted_to_root_subtree(tmp_db_path: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_add_edge_round_trips_through_list(tmp_db_path: str) -> None:
+def test_set_focus_rejects_node_from_different_session(tmp_db_path: str) -> None:
+    """set_focus must reject a node that exists in a *different* session,
+    even if the bare id happens to be valid somewhere in the database."""
     storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_a", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_session(
+        session_id="ses_b", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_a", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="n1", session_id="ses_a", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:01:00Z",
+    )
+
+    with pytest.raises(ValueError, match="node"):
+        storage.set_focus(
+            session_id="ses_b", node_id="n1",
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def _seed_two_endpoints(storage: Storage) -> None:
+    """Seed session ses_1 with root_a and two question nodes n1, n2."""
     storage.insert_session(
         session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
     )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="n1", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:01:00Z",
+    )
+    storage.insert_node(
+        node_id="n2", session_id="ses_1", node_type="answer",
+        text="!", parent_id="n1", parent_kind="node",
+        now="2026-05-20T10:02:00Z",
+    )
+
+
+def test_add_edge_round_trips_through_list(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
 
     edge_id = storage.add_edge(
         session_id="ses_1",
-        from_node="node_x", to_node="node_y",
+        from_node="n1", to_node="n2",
         edge_type="requires", reason="dep",
         now="2026-05-20T11:00:00Z",
     )
@@ -697,21 +743,63 @@ def test_add_edge_round_trips_through_list(tmp_db_path: str) -> None:
     rows = storage.list_edges(session_id="ses_1")
     assert len(rows) == 1
     assert rows[0]["id"] == edge_id
-    assert rows[0]["from_node"] == "node_x"
-    assert rows[0]["to_node"] == "node_y"
+    assert rows[0]["from_node"] == "n1"
+    assert rows[0]["to_node"] == "n2"
     assert rows[0]["type"] == "requires"
     assert rows[0]["reason"] == "dep"
 
 
-def test_add_edge_touches_session_updated_at(tmp_db_path: str) -> None:
+def test_add_edge_allows_root_endpoints(tmp_db_path: str) -> None:
+    """Roots are valid edge endpoints (e.g., derived_from a root)."""
     storage = Storage.open(tmp_db_path)
-    storage.insert_session(
-        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
-    )
+    _seed_two_endpoints(storage)
 
     storage.add_edge(
         session_id="ses_1",
-        from_node="a", to_node="b",
+        from_node="n2", to_node="root_a",
+        edge_type="derived_from", reason=None,
+        now="2026-05-20T11:00:00Z",
+    )
+
+    rows = storage.list_edges(session_id="ses_1")
+    assert len(rows) == 1
+    assert rows[0]["from_node"] == "n2"
+    assert rows[0]["to_node"] == "root_a"
+
+
+def test_add_edge_rejects_unknown_from_node(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    with pytest.raises(ValueError, match="from_node"):
+        storage.add_edge(
+            session_id="ses_1",
+            from_node="ghost", to_node="n2",
+            edge_type="requires", reason=None,
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def test_add_edge_rejects_unknown_to_node(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    with pytest.raises(ValueError, match="to_node"):
+        storage.add_edge(
+            session_id="ses_1",
+            from_node="n1", to_node="ghost",
+            edge_type="requires", reason=None,
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def test_add_edge_touches_session_updated_at(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    storage.add_edge(
+        session_id="ses_1",
+        from_node="n1", to_node="n2",
         edge_type="requires", reason=None,
         now="2026-05-20T11:30:00Z",
     )
@@ -883,22 +971,56 @@ def test_accept_hypothesis_leaves_closed_siblings_alone(tmp_db_path: str) -> Non
 
 def test_list_edges_filters_by_from_node(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
-    storage.insert_session(
-        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
-    )
+    _seed_two_endpoints(storage)
     storage.add_edge(
-        session_id="ses_1", from_node="a", to_node="b",
+        session_id="ses_1", from_node="n1", to_node="n2",
         edge_type="requires", reason=None,
         now="2026-05-20T10:01:00Z",
     )
     storage.add_edge(
-        session_id="ses_1", from_node="c", to_node="d",
-        edge_type="blocks", reason=None,
+        session_id="ses_1", from_node="n2", to_node="root_a",
+        edge_type="derived_from", reason=None,
         now="2026-05-20T10:02:00Z",
     )
 
-    rows = storage.list_edges(session_id="ses_1", from_node="a")
+    rows = storage.list_edges(session_id="ses_1", from_node="n1")
 
     assert len(rows) == 1
-    assert rows[0]["from_node"] == "a"
-    assert rows[0]["to_node"] == "b"
+    assert rows[0]["from_node"] == "n1"
+    assert rows[0]["to_node"] == "n2"
+
+
+def test_accept_hypothesis_rejects_already_closed_hypothesis(tmp_db_path: str) -> None:
+    """A retry or accidental re-call on a closed hypothesis must fail loud,
+    not overwrite closure_reason and create a duplicate decision."""
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+    # First accept resolves h1, closes h2/h3 rejected, inserts d1.
+    storage.accept_hypothesis(
+        session_id="ses_1", hyp_id="h1",
+        decision_id="d1", decision_text="adopt h1",
+        rationale_id=None, rationale_text=None,
+        now="2026-05-20T11:00:00Z",
+    )
+
+    # Second call on the same (now-closed) h1 must raise.
+    with pytest.raises(ValueError, match="open"):
+        storage.accept_hypothesis(
+            session_id="ses_1", hyp_id="h1",
+            decision_id="d2", decision_text="reaccept",
+            rationale_id=None, rationale_text=None,
+            now="2026-05-20T12:00:00Z",
+        )
+
+    # Equally, a previously-rejected sibling must not be acceptable.
+    with pytest.raises(ValueError, match="open"):
+        storage.accept_hypothesis(
+            session_id="ses_1", hyp_id="h2",
+            decision_id="d3", decision_text="late switch",
+            rationale_id=None, rationale_text=None,
+            now="2026-05-20T13:00:00Z",
+        )
+
+    # Confirm no duplicate decision was inserted.
+    assert storage.get_node(session_id="ses_1", node_id="d2") is None
+    assert storage.get_node(session_id="ses_1", node_id="d3") is None

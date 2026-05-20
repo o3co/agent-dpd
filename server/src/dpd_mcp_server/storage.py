@@ -339,8 +339,27 @@ class Storage:
         reason: str | None,
         now: str,
     ) -> int:
-        """Insert an edge row. Returns the AUTOINCREMENT id."""
+        """Insert an edge row, validating both endpoints first.
+
+        Both ``from_node`` and ``to_node`` must reference an existing row in
+        the same session — either a node (nodes.id) OR a root (roots.id).
+        The edges schema has no FK constraint (parent-kind polymorphism makes
+        a literal FK impossible), so validation is enforced in app code.
+        Raises ValueError if either endpoint is missing.
+        """
         with self.connect() as conn:
+            for label, endpoint in (("from_node", from_node), ("to_node", to_node)):
+                exists = conn.execute(
+                    "SELECT 1 FROM nodes WHERE session_id = ? AND id = ? "
+                    "UNION ALL "
+                    "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                    (session_id, endpoint, session_id, endpoint),
+                ).fetchone()
+                if exists is None:
+                    raise ValueError(
+                        f"{label} {endpoint!r} not found "
+                        f"in session {session_id!r}"
+                    )
             cursor = conn.execute(
                 "INSERT INTO edges "
                 "(session_id, from_node, to_node, type, reason, created_at) "
@@ -373,11 +392,15 @@ class Storage:
             5. Bump sessions.updated_at.
 
         Returns ``{hyp_id, decision_id, rationale_id, closed_siblings}``.
-        Raises ValueError if the hypothesis is missing or not a hypothesis.
+
+        Raises ValueError when the target is missing, not a hypothesis, or
+        not currently open (preventing duplicate decisions on retry).
+        Raises sqlite3.IntegrityError when ``decision_id`` / ``rationale_id``
+        collide with an existing node id (caller owns id-uniqueness).
         """
         with self.connect() as conn:
             hyp_row = conn.execute(
-                "SELECT parent_id, parent_kind, type FROM nodes "
+                "SELECT parent_id, parent_kind, type, status FROM nodes "
                 "WHERE session_id = ? AND id = ?",
                 (session_id, hyp_id),
             ).fetchone()
@@ -388,6 +411,11 @@ class Storage:
             if hyp_row["type"] != "hypothesis":
                 raise ValueError(
                     f"node {hyp_id!r} is type {hyp_row['type']!r}, not 'hypothesis'"
+                )
+            if hyp_row["status"] != "open":
+                raise ValueError(
+                    f"hypothesis {hyp_id!r} is not open (status="
+                    f"{hyp_row['status']!r}); cannot accept a closed hypothesis"
                 )
             parent_id = hyp_row["parent_id"]
             parent_kind = hyp_row["parent_kind"]

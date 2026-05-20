@@ -163,11 +163,13 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
         })
         assert active == {"roots": []}
 
-        # add_edge + list_edges round-trip.
+        # add_edge + list_edges round-trip. Both endpoints must exist in
+        # the session (roots OR nodes accepted). Use the resolved hypothesis
+        # as the to_node and the decision as the from_node.
         call_tool(16, "add_edge", {
             "session_id": session_id,
             "from_node": accept_payload["decision_id"],
-            "to_node": root_id, "type": "derived_from",
+            "to_node": hyp_ids[1], "type": "derived_from",
         })
         edges = call_tool(17, "list_edges", {"session_id": session_id})
         assert len(edges["edges"]) == 1
