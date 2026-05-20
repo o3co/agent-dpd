@@ -282,3 +282,26 @@ def test_list_active_roots_returns_summaries(storage: Storage) -> None:
     assert result["roots"][0]["id"] == "root_a"
     assert result["roots"][0]["topic"] == "t"
     assert result["roots"][0]["lifecycle"] == "active"
+
+
+def test_start_session_coerces_empty_scope_and_label_to_none(storage: Storage) -> None:
+    result = start_session(
+        storage=storage,
+        arguments={"scope": "", "label": ""},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: f"{p}_e",
+    )
+
+    row = storage.get_session(session_id=result["session_id"])
+    assert row["scope"] is None
+    assert row["label"] is None
+
+
+def test_spawn_root_invalid_session_raises_value_error(storage: Storage) -> None:
+    with pytest.raises(ValueError):
+        spawn_root(
+            storage=storage,
+            arguments={"session_id": "ses_missing", "topic": "t"},
+            now="2026-05-20T10:00:00Z",
+            new_id=lambda p: "root_a",
+        )

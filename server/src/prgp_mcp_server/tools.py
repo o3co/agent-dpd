@@ -7,6 +7,7 @@ server module wires them into MCP `@app.call_tool` handlers.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from typing import Any
 
@@ -23,8 +24,8 @@ def start_session(
     session_id = new_id("ses")
     storage.insert_session(
         session_id=session_id,
-        scope=arguments.get("scope"),
-        label=arguments.get("label"),
+        scope=arguments.get("scope") or None,
+        label=arguments.get("label") or None,
         now=now,
     )
     return {"session_id": session_id}
@@ -41,9 +42,14 @@ def spawn_root(
     topic = _required(arguments, "topic")
     # `reason` is recorded in audit log in a later phase; ignored here.
     root_id = new_id("root")
-    storage.insert_root(
-        root_id=root_id, session_id=session_id, topic=topic, now=now
-    )
+    try:
+        storage.insert_root(
+            root_id=root_id, session_id=session_id, topic=topic, now=now
+        )
+    except sqlite3.IntegrityError as exc:
+        raise ValueError(
+            f"cannot spawn root in session {session_id!r}: {exc}"
+        ) from exc
     return {"root_id": root_id}
 
 
@@ -64,15 +70,20 @@ def add_node(
     )
 
     node_id = new_id("node")
-    storage.insert_node(
-        node_id=node_id,
-        session_id=session_id,
-        node_type=node_type,
-        text=text,
-        parent_id=parent_id,
-        parent_kind=parent_kind,
-        now=now,
-    )
+    try:
+        storage.insert_node(
+            node_id=node_id,
+            session_id=session_id,
+            node_type=node_type,
+            text=text,
+            parent_id=parent_id,
+            parent_kind=parent_kind,
+            now=now,
+        )
+    except sqlite3.IntegrityError as exc:
+        raise ValueError(
+            f"cannot add node in session {session_id!r}: {exc}"
+        ) from exc
     return {"node_id": node_id}
 
 
