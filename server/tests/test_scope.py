@@ -46,3 +46,14 @@ def test_resolve_returns_root_as_is_when_no_marker(tmp_path: Path) -> None:
     encoded = resolve_agent_scope([f"file://{workspace}"])
 
     assert encoded == encode_agent_scope_path(workspace)
+
+
+def test_resolve_returns_root_when_marker_is_at_root_itself(tmp_path: Path) -> None:
+    agent_root = tmp_path / "agent-scope"
+    agent_root.mkdir()
+    (agent_root / "Makefile").write_text("# marker")
+    (agent_root / "AGENTS.md").write_text("# marker")
+
+    encoded = resolve_agent_scope([f"file://{agent_root}"])
+
+    assert encoded == encode_agent_scope_path(agent_root)
