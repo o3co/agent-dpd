@@ -185,6 +185,23 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
         assert len(all_edges["edges"]) == 2
         assert {e["type"] for e in all_edges["edges"]} == {"derived_from", "blocks"}
 
+        # export_mermaid: explicit root_id renders the archived root too
+        # (default behavior uses list_active_roots, which is empty post-archive).
+        mermaid = call_tool(19, "export_mermaid", {
+            "session_id": session_id, "root_id": root_id,
+        })
+        assert "graph TD" in mermaid["mermaid"]
+        assert "class " in mermaid["mermaid"]  # closure styling
+
+        # export_yaml is JSON-compatible — re-parses cleanly.
+        yaml_out = call_tool(20, "export_yaml", {
+            "session_id": session_id, "root_id": root_id,
+        })
+        parsed = json.loads(yaml_out["yaml"])
+        assert parsed["session"]["id"] == session_id
+        assert len(parsed["roots"]) == 1
+        assert parsed["roots"][0]["id"] == root_id
+
         # Side-effect: sqlite was created under DPD_DATA_DIR.
         expected = data_dir / str(agent_root).replace("/", "-") / "graph.sqlite"
         assert expected.exists()

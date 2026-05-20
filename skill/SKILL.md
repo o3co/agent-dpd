@@ -141,7 +141,10 @@ The `resolve_hypothesis_branch` tool encodes the most common closure pattern: ta
 | `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred` |
 | `list_open_nodes(session_id, root_id?)` | Open nodes in session (or within one root's subtree) |
 | `add_edge(session_id, from_node, to_node, type, reason?)` | Insert a free-form-typed edge between nodes |
-| `list_edges(session_id, from_node?)` | List edges (optionally filtered by from_node) |
+| `list_edges(session_id, from_node?, to_node?)` | List edges (optional from/to filters, AND'd) |
+| `list_unblocked_open_nodes(session_id, root_id?, blocker_edge_type?)` | Open nodes that no open node is blocking via the given edge type (default 'blocks') |
+| `export_mermaid(session_id, root_id?)` | Render as Mermaid `graph TD` text (paste in markdown) |
+| `export_yaml(session_id, root_id?)` | JSON-formatted YAML dump (json.loads round-trippable) |
 | `get_node(session_id, node_id)` | Fetch single node |
 | `walk_subtree(session_id, root_id)` | All descendants of root (pre-order) |
 | `list_active_roots(session_id)` | Roots with lifecycle=active |

@@ -10,6 +10,8 @@ from dpd_mcp_server.tools import (
     add_edge,
     add_node,
     close_node,
+    export_mermaid,
+    export_yaml,
     get_node,
     get_session_state,
     list_active_roots,
@@ -666,6 +668,231 @@ def test_resolve_hypothesis_branch_tool_with_rationale(storage: Storage) -> None
     r1 = storage.get_node(session_id=sid, node_id="r1")
     assert r1["type"] == "rationale"
     assert r1["parent_id"] == "d1"
+
+
+def _seed_small_decision_tree(storage: Storage) -> str:
+    """Build a session with root → hypothesis → resolve_hypothesis_branch shape.
+    Returns the session_id."""
+    start_session(
+        storage=storage, arguments={"label": "L"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "ses_1",
+    )
+    spawn_root(
+        storage=storage,
+        arguments={"session_id": "ses_1", "topic": "Pick option"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "root_a",
+    )
+    for nid in ["h1", "h2"]:
+        add_node(
+            storage=storage,
+            arguments={"session_id": "ses_1", "parent_id": "root_a",
+                       "type": "hypothesis", "text": f"option {nid}"},
+            now="2026-05-20T10:01:00Z",
+            new_id=lambda p, _nid=nid: _nid,
+        )
+    ids = iter(["d1", "r1"])
+    resolve_hypothesis_branch(
+        storage=storage,
+        arguments={
+            "session_id": "ses_1", "hyp_id": "h1",
+            "decision_text": "Adopt h1",
+            "rationale_text": "best fit",
+        },
+        now="2026-05-20T11:00:00Z",
+        new_id=lambda p: next(ids),
+    )
+    return "ses_1"
+
+
+# ---------------------------------------------------------------------------
+# export_mermaid
+# ---------------------------------------------------------------------------
+
+
+def test_export_mermaid_empty_session(storage: Storage) -> None:
+    start_session(
+        storage=storage, arguments={}, now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "ses_1",
+    )
+
+    result = export_mermaid(
+        storage=storage, arguments={"session_id": "ses_1"}
+    )
+
+    assert "graph TD" in result["mermaid"]
+
+
+def test_export_mermaid_basic_shape(storage: Storage) -> None:
+    sid = _seed_small_decision_tree(storage)
+
+    result = export_mermaid(
+        storage=storage, arguments={"session_id": sid}
+    )
+    out = result["mermaid"]
+
+    assert "graph TD" in out
+    # Root + 2 hypotheses + decision + rationale (5 nodes total)
+    for nid in ["root_a", "h1", "h2", "d1", "r1"]:
+        assert nid in out
+    # Tree edges (parent → child)
+    assert "root_a --> h1" in out
+    assert "root_a --> h2" in out
+    assert "root_a --> d1" in out
+    assert "d1 --> r1" in out
+
+
+def test_export_mermaid_includes_derived_from_edge(storage: Storage) -> None:
+    """resolve_hypothesis_branch auto-created a derived_from edge; export
+    must include it in dotted-edge form."""
+    sid = _seed_small_decision_tree(storage)
+
+    out = export_mermaid(
+        storage=storage, arguments={"session_id": sid}
+    )["mermaid"]
+
+    # derived_from edge from d1 → h1 rendered with dotted arrow + label
+    assert "d1 -.derived_from.-> h1" in out
+
+
+def test_export_mermaid_marks_closed_with_class(storage: Storage) -> None:
+    sid = _seed_small_decision_tree(storage)
+
+    out = export_mermaid(
+        storage=storage, arguments={"session_id": sid}
+    )["mermaid"]
+
+    # Closed nodes get a class assignment for styling
+    assert "class h1 closed_resolved" in out
+    assert "class h2 closed_rejected" in out
+    assert "class d1 closed_resolved" in out
+    # classDef lines provide the actual styles
+    assert "classDef closed_resolved" in out
+    assert "classDef closed_rejected" in out
+
+
+def test_export_mermaid_filters_to_one_root(storage: Storage) -> None:
+    sid = _seed_small_decision_tree(storage)
+    # Spawn a second root with one node — should NOT appear when root_id specified.
+    spawn_root(
+        storage=storage,
+        arguments={"session_id": sid, "topic": "Other"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "root_b",
+    )
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_b",
+                   "type": "question", "text": "?"},
+        now="2026-05-20T10:01:00Z",
+        new_id=lambda p: "qb",
+    )
+
+    out = export_mermaid(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": "root_a"},
+    )["mermaid"]
+
+    assert "root_a" in out
+    assert "h1" in out
+    assert "root_b" not in out
+    assert "qb" not in out
+
+
+def test_export_mermaid_sanitizes_special_chars(storage: Storage) -> None:
+    """Pipes and quotes in text must be sanitized so Mermaid parses."""
+    sid = _seed_small_decision_tree(storage)
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_a",
+                   "type": "question", "text": 'has "quotes" and | pipe'},
+        now="2026-05-20T10:05:00Z",
+        new_id=lambda p: "qx",
+    )
+
+    out = export_mermaid(
+        storage=storage, arguments={"session_id": sid}
+    )["mermaid"]
+
+    # Find the qx line — must not contain raw " or | inside the label
+    qx_lines = [l for l in out.split("\n") if "qx" in l and "question" in l]
+    assert qx_lines, "qx label line missing"
+    label = qx_lines[0]
+    # The double-quote at start/end of label is OK (Mermaid syntax),
+    # but no inner unescaped " should remain.
+    inner = label.split('"', 1)[1].rsplit('"', 1)[0]
+    assert '"' not in inner
+    assert "|" not in inner
+
+
+# ---------------------------------------------------------------------------
+# export_yaml
+# ---------------------------------------------------------------------------
+
+
+def test_export_yaml_basic_shape(storage: Storage) -> None:
+    sid = _seed_small_decision_tree(storage)
+
+    result = export_yaml(
+        storage=storage, arguments={"session_id": sid}
+    )
+    out = result["yaml"]
+
+    # YAML output should be parseable JSON-as-YAML and contain key markers
+    assert "ses_1" in out
+    assert "root_a" in out
+    assert "h1" in out
+    assert "Adopt h1" in out
+    assert "derived_from" in out
+
+
+def test_export_yaml_includes_edges(storage: Storage) -> None:
+    sid = _seed_small_decision_tree(storage)
+
+    out = export_yaml(
+        storage=storage, arguments={"session_id": sid}
+    )["yaml"]
+
+    assert "edges" in out
+    # The auto-created derived_from edge is present
+    assert "derived_from" in out
+
+
+def test_export_yaml_round_trip_through_json(storage: Storage) -> None:
+    """YAML output is JSON-compatible (json is a YAML subset), so it must
+    parse with the stdlib json module."""
+    import json as _json
+    sid = _seed_small_decision_tree(storage)
+
+    out = export_yaml(
+        storage=storage, arguments={"session_id": sid}
+    )["yaml"]
+
+    parsed = _json.loads(out)
+    assert "session" in parsed
+    assert "roots" in parsed
+    assert "edges" in parsed
+    assert parsed["session"]["id"] == sid
+    assert any(r["id"] == "root_a" for r in parsed["roots"])
+
+
+def test_export_yaml_filters_to_one_root(storage: Storage) -> None:
+    sid = _seed_small_decision_tree(storage)
+    spawn_root(
+        storage=storage,
+        arguments={"session_id": sid, "topic": "Other"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "root_b",
+    )
+
+    out = export_yaml(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": "root_a"},
+    )["yaml"]
+
+    assert "root_a" in out
+    assert "root_b" not in out
 
 
 def test_resolve_hypothesis_branch_tool_without_rationale(storage: Storage) -> None:

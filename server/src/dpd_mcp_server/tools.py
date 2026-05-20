@@ -323,6 +323,192 @@ def resolve_hypothesis_branch(
         ) from exc
 
 
+_MERMAID_MAX_LABEL = 60
+
+
+def _sanitize_for_mermaid(text: str) -> str:
+    """Strip characters that would confuse Mermaid's label/edge syntax."""
+    sanitized = (
+        text.replace("\\", "/")
+        .replace('"', "'")
+        .replace("|", "/")
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )
+    if len(sanitized) > _MERMAID_MAX_LABEL:
+        sanitized = sanitized[: _MERMAID_MAX_LABEL - 1] + "…"
+    return sanitized
+
+
+def export_mermaid(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Render the session (or one root's subtree) as a Mermaid ``graph TD``.
+
+    Output includes:
+        - Parent → child arrows for the tree
+        - Dotted, labeled arrows for non-tree edges (e.g., derived_from,
+          blocks) between rendered nodes
+        - classDef styling for closed nodes by closure_reason
+    """
+    session_id = _required(arguments, "session_id")
+    root_id_filter = arguments.get("root_id") or None
+
+    if root_id_filter is not None:
+        root_row = storage.get_root(
+            session_id=session_id, root_id=root_id_filter,
+        )
+        if root_row is None:
+            raise ValueError(
+                f"root {root_id_filter!r} not found in session {session_id!r}"
+            )
+        roots = [root_row]
+    else:
+        roots = storage.list_active_roots(session_id=session_id)
+
+    lines: list[str] = ["graph TD"]
+    rendered_ids: set[str] = set()
+    class_assignments: list[str] = []
+
+    for root in roots:
+        root_id = root["id"]
+        rendered_ids.add(root_id)
+        topic = _sanitize_for_mermaid(root["topic"])
+        lines.append(f'    {root_id}["root: {topic}"]')
+
+        subtree = storage.walk_subtree(session_id=session_id, root_id=root_id)
+        for node in subtree:
+            nid = node["id"]
+            rendered_ids.add(nid)
+            ntype = node["type"]
+            text = _sanitize_for_mermaid(node["text"])
+            lines.append(f'    {nid}["{ntype}: {text}"]')
+            lines.append(f"    {node['parent_id']} --> {nid}")
+            if node["status"] == "closed":
+                reason = node["closure_reason"] or "resolved"
+                class_assignments.append(f"    class {nid} closed_{reason}")
+
+    # Non-tree edges (only between rendered nodes)
+    all_edges = storage.list_edges(session_id=session_id)
+    for edge in all_edges:
+        if edge["from_node"] in rendered_ids and edge["to_node"] in rendered_ids:
+            etype = _sanitize_for_mermaid(edge["type"])
+            lines.append(
+                f"    {edge['from_node']} -.{etype}.-> {edge['to_node']}"
+            )
+
+    lines.extend(class_assignments)
+    lines.extend([
+        "    classDef closed_resolved fill:#a3d977,stroke:#5a8c30",
+        "    classDef closed_rejected fill:#f5a3a3,stroke:#8c3030",
+        "    classDef closed_invalidated fill:#cccccc,stroke:#666666",
+    ])
+
+    return {"mermaid": "\n".join(lines)}
+
+
+def _node_to_yaml_dict(node: Any, children_by_parent: dict[str, list[Any]]) -> dict[str, Any]:
+    """Recursively shape a node into the nested children form for YAML export."""
+    out: dict[str, Any] = {
+        "id": node["id"],
+        "type": node["type"],
+        "text": node["text"],
+        "status": node["status"],
+    }
+    if node["closure_reason"] is not None:
+        out["closure_reason"] = node["closure_reason"]
+    child_rows = children_by_parent.get(node["id"], [])
+    if child_rows:
+        out["children"] = [
+            _node_to_yaml_dict(c, children_by_parent) for c in child_rows
+        ]
+    return out
+
+
+def export_yaml(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Render session + tree + edges as JSON (which is a valid YAML subset).
+
+    Caller can ``json.loads`` the output back into a dict for round-trip,
+    or paste it into a YAML reader for display.
+    """
+    import json as _json
+
+    session_id = _required(arguments, "session_id")
+    root_id_filter = arguments.get("root_id") or None
+
+    session_row = storage.get_session(session_id=session_id)
+    if session_row is None:
+        raise ValueError(f"session {session_id!r} not found")
+
+    if root_id_filter is not None:
+        root_row = storage.get_root(
+            session_id=session_id, root_id=root_id_filter,
+        )
+        if root_row is None:
+            raise ValueError(
+                f"root {root_id_filter!r} not found in session {session_id!r}"
+            )
+        roots = [root_row]
+    else:
+        roots = storage.list_active_roots(session_id=session_id)
+
+    # Build children index keyed by parent_id (works for both root and node parents).
+    rendered_root_ids: set[str] = set()
+    children_by_parent: dict[str, list[Any]] = {}
+    rendered_node_ids: set[str] = set()
+    for root in roots:
+        rendered_root_ids.add(root["id"])
+        subtree = storage.walk_subtree(session_id=session_id, root_id=root["id"])
+        for n in subtree:
+            rendered_node_ids.add(n["id"])
+            children_by_parent.setdefault(n["parent_id"], []).append(n)
+
+    root_dicts: list[dict[str, Any]] = []
+    for root in roots:
+        root_dicts.append({
+            "id": root["id"],
+            "topic": root["topic"],
+            "lifecycle": root["lifecycle"],
+            "children": [
+                _node_to_yaml_dict(c, children_by_parent)
+                for c in children_by_parent.get(root["id"], [])
+            ],
+        })
+
+    # Edges among rendered endpoints only (roots or nodes in scope).
+    visible = rendered_root_ids | rendered_node_ids
+    edge_dicts: list[dict[str, Any]] = []
+    for edge in storage.list_edges(session_id=session_id):
+        if edge["from_node"] in visible and edge["to_node"] in visible:
+            edge_dicts.append({
+                "id": edge["id"],
+                "from": edge["from_node"],
+                "to": edge["to_node"],
+                "type": edge["type"],
+                "reason": edge["reason"],
+            })
+
+    payload = {
+        "session": {
+            "id": session_row["id"],
+            "scope": session_row["scope"],
+            "label": session_row["label"],
+            "started_at": session_row["started_at"],
+            "updated_at": session_row["updated_at"],
+            "focus_node_id": session_row["focus_node_id"],
+        },
+        "roots": root_dicts,
+        "edges": edge_dicts,
+    }
+    return {"yaml": _json.dumps(payload, indent=2, ensure_ascii=False)}
+
+
 def _required(arguments: dict[str, Any], key: str) -> Any:
     value = arguments.get(key)
     if value is None or value == "":

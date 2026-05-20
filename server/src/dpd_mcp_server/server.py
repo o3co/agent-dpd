@@ -1,4 +1,4 @@
-"""MCP server wiring: register the 16 DPD tools over stdio."""
+"""MCP server wiring: register the 18 DPD tools over stdio."""
 
 from __future__ import annotations
 
@@ -401,6 +401,55 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="export_mermaid",
+            title="Export Mermaid graph",
+            description=(
+                "Render the session (or one root's subtree) as a Mermaid "
+                "`graph TD` text block. Closed nodes get a class assignment so "
+                "they can be styled distinctly (by closure_reason). Non-tree "
+                "edges appear as dotted, labeled arrows."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "root_id": {
+                        "type": ["string", "null"],
+                        "description": "If given, restrict export to this root's subtree.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="export_yaml",
+            title="Export YAML (JSON-compatible)",
+            description=(
+                "Render session + tree + edges as JSON-formatted YAML (JSON is "
+                "a strict subset of YAML). Round-trippable via json.loads. "
+                "Useful for spec review, archival, or diffing sessions."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "root_id": {
+                        "type": ["string", "null"],
+                        "description": "If given, restrict export to this root's subtree.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
             name="resolve_hypothesis_branch",
             title="Accept hypothesis (atomic decision)",
             description=(
@@ -480,6 +529,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.list_unblocked_open_nodes(
             storage=storage, arguments=tool_args
         )
+    if name == "export_mermaid":
+        return tools.export_mermaid(storage=storage, arguments=tool_args)
+    if name == "export_yaml":
+        return tools.export_yaml(storage=storage, arguments=tool_args)
     if name == "resolve_hypothesis_branch":
         return tools.resolve_hypothesis_branch(
             storage=storage, arguments=tool_args, now=now, new_id=new_id
