@@ -108,6 +108,104 @@ def test_list_sessions_sorted_by_updated_at_desc(tmp_db_path: str) -> None:
     assert [r["id"] for r in rows] == ["ses_new", "ses_mid", "ses_old"]
 
 
+def test_insert_root_touches_session_updated_at(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T11:00:00Z",
+    )
+
+    row = storage.get_session(session_id="ses_1")
+    assert row["updated_at"] == "2026-05-20T11:00:00Z"
+
+
+def test_insert_node_touches_session_updated_at(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:30:00Z",
+    )
+    storage.insert_node(
+        node_id="q1", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T11:30:00Z",
+    )
+
+    row = storage.get_session(session_id="ses_1")
+    assert row["updated_at"] == "2026-05-20T11:30:00Z"
+
+
+def test_insert_node_under_parent_touches_session_updated_at(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:30:00Z",
+    )
+    storage.insert_node_under_parent(
+        node_id="q1", session_id="ses_1",
+        node_type="question", text="?",
+        parent_id="root_a", now="2026-05-20T12:00:00Z",
+    )
+
+    row = storage.get_session(session_id="ses_1")
+    assert row["updated_at"] == "2026-05-20T12:00:00Z"
+
+
+def test_close_node_touches_session_updated_at(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:30:00Z",
+    )
+    storage.insert_node(
+        node_id="q1", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T11:00:00Z",
+    )
+    storage.close_node(
+        session_id="ses_1", node_id="q1",
+        closure_reason="resolved",
+        now="2026-05-20T13:00:00Z",
+    )
+
+    row = storage.get_session(session_id="ses_1")
+    assert row["updated_at"] == "2026-05-20T13:00:00Z"
+
+
+def test_list_sessions_reflects_graph_activity_recency(tmp_db_path: str) -> None:
+    """Sessions with graph activity rank ahead of newer-but-idle ones."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_old", scope="x", label=None,
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_session(
+        session_id="ses_newer_but_idle", scope="x", label=None,
+        now="2026-05-20T11:00:00Z",
+    )
+    # ses_old gets activity AFTER ses_newer_but_idle was created.
+    storage.insert_root(
+        root_id="root_a", session_id="ses_old", topic="t",
+        now="2026-05-20T12:00:00Z",
+    )
+
+    rows = storage.list_sessions(scope="x")
+
+    assert [r["id"] for r in rows] == ["ses_old", "ses_newer_but_idle"]
+
+
 def test_insert_root_and_list_active_roots(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     storage.insert_session(

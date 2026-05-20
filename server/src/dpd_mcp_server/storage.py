@@ -96,6 +96,18 @@ class Storage:
                 )
             return list(cursor)
 
+    @staticmethod
+    def _touch_session(conn: sqlite3.Connection, *, session_id: str, now: str) -> None:
+        """Bump sessions.updated_at within an existing transaction.
+
+        Called from every graph mutator so list_sessions' "most recent" ordering
+        reflects actual activity rather than session-row creation time.
+        """
+        conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (now, session_id),
+        )
+
     def insert_root(
         self,
         *,
@@ -113,6 +125,7 @@ class Storage:
                 """,
                 (root_id, session_id, topic, now, now),
             )
+            self._touch_session(conn, session_id=session_id, now=now)
 
     def list_active_roots(self, *, session_id: str) -> list[sqlite3.Row]:
         with self.connect() as conn:
@@ -149,6 +162,7 @@ class Storage:
                 (node_id, session_id, node_type, text,
                  parent_id, parent_kind, now, now),
             )
+            self._touch_session(conn, session_id=session_id, now=now)
 
     def insert_node_under_parent(
         self,
@@ -194,6 +208,7 @@ class Storage:
                 (node_id, session_id, node_type, text,
                  parent_id, parent_kind, now, now),
             )
+            self._touch_session(conn, session_id=session_id, now=now)
             return parent_kind
 
     def get_node(
@@ -225,6 +240,8 @@ class Storage:
                 """,
                 (closure_reason, now, session_id, node_id),
             )
+            if cursor.rowcount > 0:
+                self._touch_session(conn, session_id=session_id, now=now)
             return cursor.rowcount > 0
 
     def walk_subtree(

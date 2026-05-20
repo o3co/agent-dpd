@@ -11,23 +11,42 @@ DPD is a graph-based protocol for structuring decision dialogues. Graph state li
 
 ## Prerequisites
 
-The `dpd-mcp-server` MCP server must be registered with Claude Code. If its tools (e.g., `mcp__dpd-mcp-server__list_sessions`) are not available, stop and tell the user to register it:
+The `dpd-mcp-server` package must be installed in the Python env Claude Code uses, AND registered as an MCP server. If its tools (e.g., `mcp__dpd-mcp-server__list_sessions`) are not available, stop and instruct the user to set it up:
 
+**1. Install the package** (from this monorepo's `server/` dir):
+
+```bash
+pip install -e ./server
 ```
-claude mcp add dpd-mcp-server -- python -m dpd_mcp_server
-# or add to .mcp.json manually
+
+This exposes the `dpd-mcp-server` console script declared in `server/pyproject.toml`.
+
+**2. Register with Claude Code**:
+
+```bash
+claude mcp add dpd-mcp-server -- dpd-mcp-server
+# alternative: python -m dpd_mcp_server (same effect)
+# or edit .mcp.json directly
 ```
+
+**3. Restart Claude Code** so the tools become discoverable. If `mcp__dpd-mcp-server__list_sessions` etc. still don't appear, re-verify both steps before continuing.
 
 ## Startup sequence (spec §8.3)
 
 ### 1. Detect sub-scope from cwd
 
-Walk up from cwd to find the nearest `scope.yaml`. The directory containing it is the sub-scope; its `name:` value is the sub-scope identifier. If no `scope.yaml` ancestor exists, sub-scope = null (top-level).
+Walk up from cwd to find the nearest `scope.yaml`. Read its declared `name:` field — that is the sub-scope identifier (NOT the directory basename, which may differ from the declared name). If no `scope.yaml` ancestor exists, sub-scope = null (top-level).
 
 ```bash
 dir="$(pwd)"
 while [ "$dir" != "/" ]; do
-  [ -f "$dir/scope.yaml" ] && { basename "$dir"; break; }
+  if [ -f "$dir/scope.yaml" ]; then
+    # Extract the declared scope name. Falls back to dir basename if `name:` missing.
+    name=$(grep -E '^name:[[:space:]]*' "$dir/scope.yaml" | head -1 \
+             | sed 's/^name:[[:space:]]*//; s/[[:space:]]*$//')
+    echo "${name:-$(basename "$dir")}"
+    break
+  fi
   dir="$(dirname "$dir")"
 done
 ```

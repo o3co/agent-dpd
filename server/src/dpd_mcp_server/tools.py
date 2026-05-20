@@ -173,6 +173,12 @@ def get_session_state(
     focus_id = session_row["focus_node_id"]
     if focus_id is not None:
         node_row = storage.get_node(session_id=session_id, node_id=focus_id)
+        # Dangling-id case: focus_node_id is set but the node row is gone.
+        # No tool deletes nodes today (revert/cascade-delete not yet implemented),
+        # so this branch is currently unreachable. When such a tool lands, decide
+        # whether to: (a) clear focus_node_id eagerly on node removal, or (b) keep
+        # surfacing focus_node_id via session.focus_node_id while returning null
+        # focus_node here so callers can detect the drift.
         focus_node = _row_to_dict(node_row) if node_row is not None else None
     return {
         "session": _row_to_dict(session_row),
