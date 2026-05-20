@@ -266,8 +266,26 @@ def list_edges(
 ) -> dict[str, Any]:
     session_id = _required(arguments, "session_id")
     from_node = arguments.get("from_node") or None
-    rows = storage.list_edges(session_id=session_id, from_node=from_node)
+    to_node = arguments.get("to_node") or None
+    rows = storage.list_edges(
+        session_id=session_id, from_node=from_node, to_node=to_node,
+    )
     return {"edges": [_row_to_dict(r) for r in rows]}
+
+
+def list_unblocked_open_nodes(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    root_id = arguments.get("root_id") or None
+    blocker_edge_type = arguments.get("blocker_edge_type") or "blocks"
+    rows = storage.list_unblocked_open_nodes(
+        session_id=session_id, root_id=root_id,
+        blocker_edge_type=blocker_edge_type,
+    )
+    return {"nodes": [_row_to_dict(r) for r in rows]}
 
 
 def accept_hypothesis(

@@ -1,4 +1,4 @@
-"""MCP server wiring: register the 15 DPD tools over stdio."""
+"""MCP server wiring: register the 16 DPD tools over stdio."""
 
 from __future__ import annotations
 
@@ -352,8 +352,9 @@ async def list_tools() -> list[types.Tool]:
             name="list_edges",
             title="List edges",
             description=(
-                "List edges in the session, optionally filtered by from_node. "
-                "Returns empty list if the session has no edges."
+                "List edges in the session, optionally filtered by from_node "
+                "and/or to_node. When both are given they are AND'd. "
+                "Returns empty list if the session has no matching edges."
             ),
             inputSchema={
                 "type": "object",
@@ -361,6 +362,37 @@ async def list_tools() -> list[types.Tool]:
                 "properties": {
                     "session_id": {"type": "string"},
                     "from_node": {"type": ["string", "null"]},
+                    "to_node": {"type": ["string", "null"]},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="list_unblocked_open_nodes",
+            title="List unblocked open nodes",
+            description=(
+                "Return open nodes that are NOT blocked by any open node via the "
+                "given edge type (default 'blocks'; directional convention: "
+                "edge.from blocks edge.to). Useful for next_focus selection when "
+                "explicit dependency edges have been declared. Optionally "
+                "restrict to one root's subtree."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "root_id": {
+                        "type": ["string", "null"],
+                        "description": "If given, restrict to this root's subtree.",
+                    },
+                    "blocker_edge_type": {
+                        "type": ["string", "null"],
+                        "description": "Edge type that counts as a blocker. Defaults to 'blocks'.",
+                    },
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
@@ -444,6 +476,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.add_edge(storage=storage, arguments=tool_args, now=now)
     if name == "list_edges":
         return tools.list_edges(storage=storage, arguments=tool_args)
+    if name == "list_unblocked_open_nodes":
+        return tools.list_unblocked_open_nodes(
+            storage=storage, arguments=tool_args
+        )
     if name == "accept_hypothesis":
         return tools.accept_hypothesis(
             storage=storage, arguments=tool_args, now=now, new_id=new_id

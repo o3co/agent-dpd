@@ -475,22 +475,57 @@ class Storage:
         *,
         session_id: str,
         from_node: str | None = None,
+        to_node: str | None = None,
     ) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM edges WHERE session_id = ?"
+        params: list[Any] = [session_id]
+        if from_node is not None:
+            sql += " AND from_node = ?"
+            params.append(from_node)
+        if to_node is not None:
+            sql += " AND to_node = ?"
+            params.append(to_node)
+        sql += " ORDER BY id"
         with self.connect() as conn:
-            if from_node is None:
-                return list(
-                    conn.execute(
-                        "SELECT * FROM edges WHERE session_id = ? ORDER BY id",
-                        (session_id,),
-                    )
-                )
-            return list(
-                conn.execute(
-                    "SELECT * FROM edges "
-                    "WHERE session_id = ? AND from_node = ? ORDER BY id",
-                    (session_id, from_node),
-                )
-            )
+            return list(conn.execute(sql, params))
+
+    def list_unblocked_open_nodes(
+        self,
+        *,
+        session_id: str,
+        root_id: str | None = None,
+        blocker_edge_type: str = "blocks",
+    ) -> list[sqlite3.Row]:
+        """Return open nodes that no *open node* is blocking via the given
+        edge type (directional convention: edge.from blocks edge.to).
+
+        ``blocker_edge_type`` defaults to ``"blocks"`` but is overridable so a
+        caller using a different vocabulary (e.g., ``"requires"``) can opt in.
+
+        Limitation: only **nodes** count as blockers. A root with an outgoing
+        blocker edge is currently ignored (roots have lifecycle, not status,
+        so "open root" is not directly comparable). Skill side may add stricter
+        semantics on top.
+        """
+        candidates = self.list_open_nodes(session_id=session_id, root_id=root_id)
+        if not candidates:
+            return []
+        with self.connect() as conn:
+            blocked = conn.execute(
+                """
+                SELECT DISTINCT e.to_node
+                FROM edges e
+                JOIN nodes blocker
+                  ON blocker.id = e.from_node
+                 AND blocker.session_id = e.session_id
+                WHERE e.session_id = ?
+                  AND e.type = ?
+                  AND blocker.status = 'open'
+                """,
+                (session_id, blocker_edge_type),
+            ).fetchall()
+        blocked_ids = {row["to_node"] for row in blocked}
+        return [n for n in candidates if n["id"] not in blocked_ids]
 
     def walk_subtree(
         self, *, session_id: str, root_id: str

@@ -990,6 +990,127 @@ def test_list_edges_filters_by_from_node(tmp_db_path: str) -> None:
     assert rows[0]["to_node"] == "n2"
 
 
+def test_list_edges_filters_by_to_node(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None,
+        now="2026-05-20T10:01:00Z",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="root_a", to_node="n2",
+        edge_type="blocks", reason=None,
+        now="2026-05-20T10:02:00Z",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="root_a",
+        edge_type="derived_from", reason=None,
+        now="2026-05-20T10:03:00Z",
+    )
+
+    rows = storage.list_edges(session_id="ses_1", to_node="n2")
+
+    assert [r["from_node"] for r in rows] == ["n1", "root_a"]
+
+
+def test_list_unblocked_open_nodes_empty_session(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+
+    assert storage.list_unblocked_open_nodes(session_id="ses_1") == []
+
+
+def test_list_unblocked_open_nodes_returns_all_when_no_edges(tmp_db_path: str) -> None:
+    """No edges = no blockers, so all open nodes are unblocked."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    rows = storage.list_unblocked_open_nodes(session_id="ses_1")
+
+    assert {r["id"] for r in rows} == {"n1", "n2"}
+
+
+def test_list_unblocked_open_nodes_excludes_blocked_nodes(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    # n2 is blocked by n1 (open). n2 should NOT be in unblocked list.
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="blocks", reason=None,
+        now="2026-05-20T10:03:00Z",
+    )
+
+    rows = storage.list_unblocked_open_nodes(session_id="ses_1")
+
+    assert [r["id"] for r in rows] == ["n1"]
+
+
+def test_list_unblocked_open_nodes_includes_after_blocker_closes(tmp_db_path: str) -> None:
+    """Once the blocker closes, the blocked node becomes unblocked."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="blocks", reason=None,
+        now="2026-05-20T10:03:00Z",
+    )
+
+    storage.close_node(
+        session_id="ses_1", node_id="n1",
+        closure_reason="resolved", now="2026-05-20T11:00:00Z",
+    )
+
+    rows = storage.list_unblocked_open_nodes(session_id="ses_1")
+
+    assert [r["id"] for r in rows] == ["n2"]
+
+
+def test_list_unblocked_open_nodes_respects_custom_blocker_edge_type(tmp_db_path: str) -> None:
+    """Default blocker edge type is 'blocks'; caller can override."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    # n1 'requires' n2 — in this caller's vocabulary, "requires" is what blocks.
+    storage.add_edge(
+        session_id="ses_1", from_node="n2", to_node="n1",
+        edge_type="requires", reason=None,
+        now="2026-05-20T10:03:00Z",
+    )
+
+    # With default 'blocks' type, no blocker is recognized.
+    default_rows = storage.list_unblocked_open_nodes(session_id="ses_1")
+    assert {r["id"] for r in default_rows} == {"n1", "n2"}
+
+    # With 'requires', n1 is blocked by open n2.
+    rows = storage.list_unblocked_open_nodes(
+        session_id="ses_1", blocker_edge_type="requires",
+    )
+    assert [r["id"] for r in rows] == ["n2"]
+
+
+def test_list_unblocked_open_nodes_restricted_to_root(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    storage.insert_root(
+        root_id="root_b", session_id="ses_1", topic="B",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="m1", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_b", parent_kind="root",
+        now="2026-05-20T10:01:00Z",
+    )
+
+    rows = storage.list_unblocked_open_nodes(
+        session_id="ses_1", root_id="root_a",
+    )
+
+    # Only root_a's descendants: n1, n2 (m1 belongs to root_b).
+    assert {r["id"] for r in rows} == {"n1", "n2"}
+
+
 def test_accept_hypothesis_rejects_already_closed_hypothesis(tmp_db_path: str) -> None:
     """A retry or accidental re-call on a closed hypothesis must fail loud,
     not overwrite closure_reason and create a duplicate decision."""
