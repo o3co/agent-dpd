@@ -226,6 +226,25 @@ def test_walk_subtree_handles_deep_chain(tmp_db_path: str) -> None:
     assert nodes[-1]["id"] == f"n{depth - 1:04d}"
 
 
+def test_insert_node_rejects_invalid_type_at_storage_layer(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    import sqlite3 as _sqlite3
+    with pytest.raises(_sqlite3.IntegrityError):
+        storage.insert_node(
+            node_id="bad", session_id="ses_1",
+            node_type="bogus_type", text="?",
+            parent_id="root_a", parent_kind="root",
+            now="2026-05-20T10:00:00Z",
+        )
+
+
 def test_close_node_rejects_invalid_closure_reason_at_storage_layer(
     tmp_db_path: str,
 ) -> None:

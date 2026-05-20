@@ -30,7 +30,14 @@ CREATE INDEX IF NOT EXISTS idx_roots_lifecycle ON roots(session_id, lifecycle);
 CREATE TABLE IF NOT EXISTS nodes (
     id              TEXT PRIMARY KEY,
     session_id      TEXT NOT NULL REFERENCES sessions(id),
-    type            TEXT NOT NULL,           -- question|answer|plan|action|... (§2.2)
+    type            TEXT NOT NULL CHECK (type IN (
+        -- Problem side
+        'question','plan','hypothesis','goal','problem',
+        -- Solution side
+        'answer','action','verification','decision','resolution',
+        -- Support
+        'evidence','constraint','assumption','rationale','risk'
+    )),
     text            TEXT NOT NULL,
     status          TEXT NOT NULL CHECK (status IN ('open','closed')),
     closure_reason  TEXT
@@ -58,4 +65,4 @@ CREATE INDEX IF NOT EXISTS idx_edges_session ON edges(session_id);
 CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(session_id, from_node);
 
 -- Schema version sentinel; bump in lock-step with `Storage.open()` migrations.
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;

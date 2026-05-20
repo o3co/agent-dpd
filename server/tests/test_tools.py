@@ -305,3 +305,20 @@ def test_spawn_root_invalid_session_raises_value_error(storage: Storage) -> None
             now="2026-05-20T10:00:00Z",
             new_id=lambda p: "root_a",
         )
+
+
+import sqlite3 as _sqlite3  # noqa: E402
+
+
+def test_add_node_rejects_invalid_type_via_storage_constraint(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+    # Tool layer doesn't validate type; storage layer does.
+    # IntegrityError is wrapped into ValueError by add_node's try/except.
+    with pytest.raises(ValueError):
+        add_node(
+            storage=storage,
+            arguments={"session_id": sid, "parent_id": "root_a",
+                       "type": "bogus", "text": "?"},
+            now="2026-05-20T10:00:00Z",
+            new_id=lambda p: "node_x",
+        )
