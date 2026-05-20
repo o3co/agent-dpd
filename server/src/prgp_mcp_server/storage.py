@@ -64,7 +64,7 @@ class Storage:
                 (session_id, scope, label, now, now),
             )
 
-    def get_session(self, session_id: str) -> sqlite3.Row | None:
+    def get_session(self, *, session_id: str) -> sqlite3.Row | None:
         with self.connect() as conn:
             return conn.execute(
                 "SELECT * FROM sessions WHERE id = ?", (session_id,)
@@ -95,7 +95,7 @@ class Storage:
                     """
                     SELECT * FROM roots
                     WHERE session_id = ? AND lifecycle = 'active'
-                    ORDER BY spawned_at
+                    ORDER BY spawned_at, id
                     """,
                     (session_id,),
                 )
@@ -140,9 +140,10 @@ class Storage:
         node_id: str,
         closure_reason: str,
         now: str,
-    ) -> None:
+    ) -> bool:
+        """Close a node. Returns True if a row was updated, False if no such node."""
         with self.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE nodes
                 SET status = 'closed',
@@ -152,6 +153,7 @@ class Storage:
                 """,
                 (closure_reason, now, session_id, node_id),
             )
+            return cursor.rowcount > 0
 
     def walk_subtree(
         self, *, session_id: str, root_id: str
@@ -167,7 +169,7 @@ class Storage:
                     WHERE session_id = ?
                       AND parent_id = ?
                       AND parent_kind = ?
-                    ORDER BY created_at
+                    ORDER BY created_at, id
                     """,
                     (session_id, parent_id, parent_kind),
                 ).fetchall()

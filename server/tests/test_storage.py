@@ -39,7 +39,7 @@ def test_insert_session_round_trips_through_get(tmp_db_path: str) -> None:
         now="2026-05-20T10:00:00Z",
     )
 
-    row = storage.get_session("ses_abc")
+    row = storage.get_session(session_id="ses_abc")
     assert row["scope"] == "problem-graph.protocol"
     assert row["label"] == "exploration"
     assert row["started_at"] == "2026-05-20T10:00:00Z"
@@ -134,17 +134,34 @@ def test_close_node_marks_status_and_reason(tmp_db_path: str) -> None:
         now="2026-05-20T10:00:00Z",
     )
 
-    storage.close_node(
+    result = storage.close_node(
         session_id="ses_1",
         node_id="q1",
         closure_reason="resolved",
         now="2026-05-20T11:00:00Z",
     )
 
+    assert result is True
     row = storage.get_node(session_id="ses_1", node_id="q1")
     assert row["status"] == "closed"
     assert row["closure_reason"] == "resolved"
     assert row["updated_at"] == "2026-05-20T11:00:00Z"
+
+
+def test_close_node_returns_false_when_node_missing(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+
+    result = storage.close_node(
+        session_id="ses_1",
+        node_id="does_not_exist",
+        closure_reason="resolved",
+        now="2026-05-20T11:00:00Z",
+    )
+
+    assert result is False
 
 
 def test_walk_subtree_returns_descendants_depth_first(tmp_db_path: str) -> None:
