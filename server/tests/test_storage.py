@@ -464,3 +464,441 @@ def test_close_node_rejects_invalid_closure_reason_at_storage_layer(
             closure_reason="bogus_reason",
             now="2026-05-20T11:00:00Z",
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.5: set_focus
+# ---------------------------------------------------------------------------
+
+
+def test_set_focus_updates_session_focus_node_id(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="q1", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:00:00Z",
+    )
+
+    storage.set_focus(
+        session_id="ses_1", node_id="q1", now="2026-05-20T11:00:00Z",
+    )
+
+    row = storage.get_session(session_id="ses_1")
+    assert row["focus_node_id"] == "q1"
+    assert row["updated_at"] == "2026-05-20T11:00:00Z"
+
+
+def test_set_focus_can_clear_with_none(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="q1", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.set_focus(
+        session_id="ses_1", node_id="q1", now="2026-05-20T11:00:00Z",
+    )
+
+    storage.set_focus(
+        session_id="ses_1", node_id=None, now="2026-05-20T12:00:00Z",
+    )
+
+    row = storage.get_session(session_id="ses_1")
+    assert row["focus_node_id"] is None
+    assert row["updated_at"] == "2026-05-20T12:00:00Z"
+
+
+def test_set_focus_raises_when_node_missing(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+
+    with pytest.raises(ValueError, match="node"):
+        storage.set_focus(
+            session_id="ses_1", node_id="ghost",
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def test_set_focus_raises_when_session_missing(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+
+    with pytest.raises(ValueError, match="session"):
+        storage.set_focus(
+            session_id="ses_missing", node_id=None,
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.5: set_root_lifecycle
+# ---------------------------------------------------------------------------
+
+
+def test_set_root_lifecycle_archives_root(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+
+    result = storage.set_root_lifecycle(
+        session_id="ses_1", root_id="root_a",
+        lifecycle="archived", now="2026-05-20T11:00:00Z",
+    )
+
+    assert result is True
+    active = storage.list_active_roots(session_id="ses_1")
+    assert active == []
+    session_row = storage.get_session(session_id="ses_1")
+    assert session_row["updated_at"] == "2026-05-20T11:00:00Z"
+
+
+def test_set_root_lifecycle_returns_false_when_root_missing(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+
+    result = storage.set_root_lifecycle(
+        session_id="ses_1", root_id="root_ghost",
+        lifecycle="archived", now="2026-05-20T11:00:00Z",
+    )
+
+    assert result is False
+
+
+def test_set_root_lifecycle_rejects_invalid_value(tmp_db_path: str) -> None:
+    import sqlite3 as _sqlite3
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+
+    with pytest.raises(_sqlite3.IntegrityError):
+        storage.set_root_lifecycle(
+            session_id="ses_1", root_id="root_a",
+            lifecycle="bogus", now="2026-05-20T11:00:00Z",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.5: list_open_nodes
+# ---------------------------------------------------------------------------
+
+
+def test_list_open_nodes_empty_session(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+
+    assert storage.list_open_nodes(session_id="ses_1") == []
+
+
+def test_list_open_nodes_returns_only_open_nodes(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="q1", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:01:00Z",
+    )
+    storage.insert_node(
+        node_id="q2", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:02:00Z",
+    )
+    storage.close_node(
+        session_id="ses_1", node_id="q1",
+        closure_reason="resolved", now="2026-05-20T10:03:00Z",
+    )
+
+    rows = storage.list_open_nodes(session_id="ses_1")
+
+    assert [r["id"] for r in rows] == ["q2"]
+
+
+def test_list_open_nodes_restricted_to_root_subtree(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="A",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_root(
+        root_id="root_b", session_id="ses_1", topic="B",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="qa", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:01:00Z",
+    )
+    storage.insert_node(
+        node_id="qb", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_b", parent_kind="root",
+        now="2026-05-20T10:02:00Z",
+    )
+
+    rows = storage.list_open_nodes(session_id="ses_1", root_id="root_a")
+
+    assert [r["id"] for r in rows] == ["qa"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.5: add_edge / list_edges
+# ---------------------------------------------------------------------------
+
+
+def test_add_edge_round_trips_through_list(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+
+    edge_id = storage.add_edge(
+        session_id="ses_1",
+        from_node="node_x", to_node="node_y",
+        edge_type="requires", reason="dep",
+        now="2026-05-20T11:00:00Z",
+    )
+
+    rows = storage.list_edges(session_id="ses_1")
+    assert len(rows) == 1
+    assert rows[0]["id"] == edge_id
+    assert rows[0]["from_node"] == "node_x"
+    assert rows[0]["to_node"] == "node_y"
+    assert rows[0]["type"] == "requires"
+    assert rows[0]["reason"] == "dep"
+
+
+def test_add_edge_touches_session_updated_at(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+
+    storage.add_edge(
+        session_id="ses_1",
+        from_node="a", to_node="b",
+        edge_type="requires", reason=None,
+        now="2026-05-20T11:30:00Z",
+    )
+
+    session = storage.get_session(session_id="ses_1")
+    assert session["updated_at"] == "2026-05-20T11:30:00Z"
+
+
+def test_get_root_round_trips(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="Architecture",
+        now="2026-05-20T10:01:00Z",
+    )
+
+    row = storage.get_root(session_id="ses_1", root_id="root_a")
+
+    assert row is not None
+    assert row["topic"] == "Architecture"
+    assert row["lifecycle"] == "active"
+
+
+def test_get_root_returns_none_when_missing(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    assert storage.get_root(session_id="ses_1", root_id="root_ghost") is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.5: accept_hypothesis (atomic composite)
+# ---------------------------------------------------------------------------
+
+
+def _seed_hypothesis_branch(storage: Storage) -> None:
+    """Build root_a with 3 open hypothesis children: h1, h2, h3."""
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    for nid in ["h1", "h2", "h3"]:
+        storage.insert_node(
+            node_id=nid, session_id="ses_1", node_type="hypothesis",
+            text=f"option {nid}", parent_id="root_a", parent_kind="root",
+            now="2026-05-20T10:01:00Z",
+        )
+
+
+def test_accept_hypothesis_closes_target_resolved_and_siblings_rejected(
+    tmp_db_path: str,
+) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    result = storage.accept_hypothesis(
+        session_id="ses_1", hyp_id="h2",
+        decision_id="d1", decision_text="adopt h2",
+        rationale_id="r1", rationale_text="best fit",
+        now="2026-05-20T11:00:00Z",
+    )
+
+    assert result == {
+        "hyp_id": "h2", "decision_id": "d1", "rationale_id": "r1",
+        "closed_siblings": ["h1", "h3"],
+    }
+
+    h2 = storage.get_node(session_id="ses_1", node_id="h2")
+    assert h2["status"] == "closed"
+    assert h2["closure_reason"] == "resolved"
+
+    h1 = storage.get_node(session_id="ses_1", node_id="h1")
+    h3 = storage.get_node(session_id="ses_1", node_id="h3")
+    assert h1["closure_reason"] == "rejected"
+    assert h3["closure_reason"] == "rejected"
+
+    d1 = storage.get_node(session_id="ses_1", node_id="d1")
+    assert d1["type"] == "decision"
+    assert d1["status"] == "closed"
+    assert d1["closure_reason"] == "resolved"
+    assert d1["parent_id"] == "root_a"
+    assert d1["parent_kind"] == "root"
+
+    r1 = storage.get_node(session_id="ses_1", node_id="r1")
+    assert r1["type"] == "rationale"
+    assert r1["parent_id"] == "d1"
+    assert r1["parent_kind"] == "node"
+
+
+def test_accept_hypothesis_without_rationale(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    result = storage.accept_hypothesis(
+        session_id="ses_1", hyp_id="h1",
+        decision_id="d1", decision_text="adopt h1",
+        rationale_id=None, rationale_text=None,
+        now="2026-05-20T11:00:00Z",
+    )
+
+    assert result["rationale_id"] is None
+    assert storage.get_node(session_id="ses_1", node_id="d1") is not None
+
+
+def test_accept_hypothesis_raises_when_target_missing(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    with pytest.raises(ValueError, match="hypothesis"):
+        storage.accept_hypothesis(
+            session_id="ses_1", hyp_id="h_ghost",
+            decision_id="d1", decision_text="x",
+            rationale_id=None, rationale_text=None,
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def test_accept_hypothesis_rejects_non_hypothesis_target(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="q1", session_id="ses_1", node_type="question",
+        text="?", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:01:00Z",
+    )
+
+    with pytest.raises(ValueError, match="not 'hypothesis'"):
+        storage.accept_hypothesis(
+            session_id="ses_1", hyp_id="q1",
+            decision_id="d1", decision_text="x",
+            rationale_id=None, rationale_text=None,
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def test_accept_hypothesis_leaves_closed_siblings_alone(tmp_db_path: str) -> None:
+    """Already-closed sibling hypotheses are not re-closed."""
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+    storage.close_node(
+        session_id="ses_1", node_id="h1",
+        closure_reason="invalidated", now="2026-05-20T10:30:00Z",
+    )
+
+    result = storage.accept_hypothesis(
+        session_id="ses_1", hyp_id="h2",
+        decision_id="d1", decision_text="x",
+        rationale_id=None, rationale_text=None,
+        now="2026-05-20T11:00:00Z",
+    )
+
+    # Only h3 is auto-rejected; h1 keeps its earlier closure_reason.
+    assert result["closed_siblings"] == ["h3"]
+    h1 = storage.get_node(session_id="ses_1", node_id="h1")
+    assert h1["closure_reason"] == "invalidated"
+
+
+def test_list_edges_filters_by_from_node(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="a", to_node="b",
+        edge_type="requires", reason=None,
+        now="2026-05-20T10:01:00Z",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="c", to_node="d",
+        edge_type="blocks", reason=None,
+        now="2026-05-20T10:02:00Z",
+    )
+
+    rows = storage.list_edges(session_id="ses_1", from_node="a")
+
+    assert len(rows) == 1
+    assert rows[0]["from_node"] == "a"
+    assert rows[0]["to_node"] == "b"

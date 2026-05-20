@@ -1,4 +1,4 @@
-"""MCP server wiring: register the 9 DPD tools over stdio."""
+"""MCP server wiring: register the 15 DPD tools over stdio."""
 
 from __future__ import annotations
 
@@ -253,6 +253,149 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="set_focus",
+            title="Set focus node",
+            description=(
+                "Set or clear sessions.focus_node_id. Pass node_id=null (or omit) "
+                "to clear focus. Validates the node exists in the session."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "node_id": {
+                        "type": ["string", "null"],
+                        "description": "Target node id, or null to clear focus.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="set_root_lifecycle",
+            title="Set root lifecycle",
+            description=(
+                "Transition a root's lifecycle to one of 'active', 'archived', "
+                "'deferred'. Used to retire roots whose discussion has wrapped up "
+                "without removing their history."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "root_id", "lifecycle"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "root_id": {"type": "string"},
+                    "lifecycle": {
+                        "type": "string",
+                        "enum": ["active", "archived", "deferred"],
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="list_open_nodes",
+            title="List open nodes",
+            description=(
+                "Return open nodes in the session, optionally restricted to one root's "
+                "subtree. Powers next_focus selection (deepest-within after recency-"
+                "ranked root)."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "root_id": {
+                        "type": ["string", "null"],
+                        "description": "If given, restrict to this root's subtree.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="add_edge",
+            title="Add edge",
+            description=(
+                "Insert an edge between two nodes (e.g., requires/blocks/derived_from). "
+                "Edge type vocabulary is free-form for now (no DB-level CHECK)."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "from_node", "to_node", "type"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "from_node": {"type": "string"},
+                    "to_node": {"type": "string"},
+                    "type": {"type": "string"},
+                    "reason": {"type": ["string", "null"]},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="list_edges",
+            title="List edges",
+            description=(
+                "List edges in the session, optionally filtered by from_node. "
+                "Returns empty list if the session has no edges."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "from_node": {"type": ["string", "null"]},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="accept_hypothesis",
+            title="Accept hypothesis (atomic decision)",
+            description=(
+                "Atomic closure accelerator: closes the chosen hypothesis as resolved, "
+                "rejects open sibling hypotheses (same parent), inserts a 'decision' "
+                "node under the same parent, optionally inserts a 'rationale' under "
+                "the decision — all in a single transaction. Replaces 5+ separate "
+                "close_node/add_node calls in the typical N-options closure flow."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "hyp_id", "decision_text"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "hyp_id": {"type": "string"},
+                    "decision_text": {"type": "string"},
+                    "rationale_text": {
+                        "type": ["string", "null"],
+                        "description": "Optional. If given, a rationale node is inserted under the decision.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -289,6 +432,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.list_sessions(storage=storage, arguments=tool_args)
     if name == "get_session_state":
         return tools.get_session_state(storage=storage, arguments=tool_args)
+    if name == "set_focus":
+        return tools.set_focus(storage=storage, arguments=tool_args, now=now)
+    if name == "set_root_lifecycle":
+        return tools.set_root_lifecycle(
+            storage=storage, arguments=tool_args, now=now
+        )
+    if name == "list_open_nodes":
+        return tools.list_open_nodes(storage=storage, arguments=tool_args)
+    if name == "add_edge":
+        return tools.add_edge(storage=storage, arguments=tool_args, now=now)
+    if name == "list_edges":
+        return tools.list_edges(storage=storage, arguments=tool_args)
+    if name == "accept_hypothesis":
+        return tools.accept_hypothesis(
+            storage=storage, arguments=tool_args, now=now, new_id=new_id
+        )
 
     raise ValueError(f"unknown tool: {name}")
 

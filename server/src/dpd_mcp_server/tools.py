@@ -50,7 +50,8 @@ def spawn_root(
         raise ValueError(
             f"cannot spawn root in session {session_id!r}: {exc}"
         ) from exc
-    return {"root_id": root_id}
+    row = storage.get_root(session_id=session_id, root_id=root_id)
+    return {"root": _row_to_dict(row)}
 
 
 def add_node(
@@ -79,7 +80,8 @@ def add_node(
         raise ValueError(
             f"cannot add node in session {session_id!r}: {exc}"
         ) from exc
-    return {"node_id": node_id}
+    row = storage.get_node(session_id=session_id, node_id=node_id)
+    return {"node": _row_to_dict(row)}
 
 
 _VALID_CLOSURE_REASONS = {"resolved", "rejected", "invalidated"}
@@ -185,6 +187,122 @@ def get_session_state(
         "active_roots": [_row_to_dict(r) for r in roots],
         "focus_node": focus_node,
     }
+
+
+_VALID_ROOT_LIFECYCLES = {"active", "archived", "deferred"}
+
+
+def set_focus(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    node_id = arguments.get("node_id") or None
+    storage.set_focus(session_id=session_id, node_id=node_id, now=now)
+    return {"session_id": session_id, "focus_node_id": node_id}
+
+
+def set_root_lifecycle(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    root_id = _required(arguments, "root_id")
+    lifecycle = _required(arguments, "lifecycle")
+    if lifecycle not in _VALID_ROOT_LIFECYCLES:
+        raise ValueError(
+            f"lifecycle must be one of {sorted(_VALID_ROOT_LIFECYCLES)}, "
+            f"got {lifecycle!r}"
+        )
+    updated = storage.set_root_lifecycle(
+        session_id=session_id, root_id=root_id,
+        lifecycle=lifecycle, now=now,
+    )
+    if not updated:
+        raise ValueError(
+            f"root {root_id!r} not found in session {session_id!r}"
+        )
+    return {"root_id": root_id, "lifecycle": lifecycle}
+
+
+def list_open_nodes(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    root_id = arguments.get("root_id") or None
+    rows = storage.list_open_nodes(session_id=session_id, root_id=root_id)
+    return {"nodes": [_row_to_dict(r) for r in rows]}
+
+
+def add_edge(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    from_node = _required(arguments, "from_node")
+    to_node = _required(arguments, "to_node")
+    edge_type = _required(arguments, "type")
+    reason = arguments.get("reason") or None
+    edge_id = storage.add_edge(
+        session_id=session_id,
+        from_node=from_node, to_node=to_node,
+        edge_type=edge_type, reason=reason, now=now,
+    )
+    return {"edge_id": edge_id}
+
+
+def list_edges(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    from_node = arguments.get("from_node") or None
+    rows = storage.list_edges(session_id=session_id, from_node=from_node)
+    return {"edges": [_row_to_dict(r) for r in rows]}
+
+
+def accept_hypothesis(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+    new_id: Callable[[str], str],
+) -> dict[str, Any]:
+    """Atomically close a hypothesis branch and record the decision.
+
+    Closes the chosen hypothesis as 'resolved', sibling hypotheses (same
+    parent, open) as 'rejected', then inserts decision (+ optional rationale)
+    nodes — all in a single transaction. Replaces 5+ separate close_node /
+    add_node calls in the typical "pick from N options" closure flow.
+    """
+    session_id = _required(arguments, "session_id")
+    hyp_id = _required(arguments, "hyp_id")
+    decision_text = _required(arguments, "decision_text")
+    rationale_text = arguments.get("rationale_text") or None
+
+    decision_id = new_id("node")
+    rationale_id = new_id("node") if rationale_text is not None else None
+
+    try:
+        return storage.accept_hypothesis(
+            session_id=session_id, hyp_id=hyp_id,
+            decision_id=decision_id, decision_text=decision_text,
+            rationale_id=rationale_id, rationale_text=rationale_text,
+            now=now,
+        )
+    except sqlite3.IntegrityError as exc:
+        raise ValueError(
+            f"accept_hypothesis failed in session {session_id!r}: {exc}"
+        ) from exc
 
 
 def _required(arguments: dict[str, Any], key: str) -> Any:

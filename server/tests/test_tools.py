@@ -6,12 +6,18 @@ import pytest
 
 from dpd_mcp_server.storage import Storage
 from dpd_mcp_server.tools import (
+    accept_hypothesis,
+    add_edge,
     add_node,
     close_node,
     get_node,
     get_session_state,
     list_active_roots,
+    list_edges,
+    list_open_nodes,
     list_sessions,
+    set_focus,
+    set_root_lifecycle,
     spawn_root,
     start_session,
     walk_subtree,
@@ -186,10 +192,11 @@ def test_spawn_root_creates_active_root(storage: Storage) -> None:
         new_id=lambda p: "root_a",
     )
 
-    assert result == {"root_id": "root_a"}
+    assert result["root"]["id"] == "root_a"
+    assert result["root"]["topic"] == "MCP architecture"
+    assert result["root"]["lifecycle"] == "active"
     active = storage.list_active_roots(session_id="ses_1")
     assert [r["id"] for r in active] == ["root_a"]
-    assert active[0]["topic"] == "MCP architecture"
 
 
 def test_spawn_root_requires_topic(storage: Storage) -> None:
@@ -239,11 +246,11 @@ def test_add_node_under_root_records_parent_kind_root(storage: Storage) -> None:
         new_id=lambda p: "q1",
     )
 
-    assert result == {"node_id": "q1"}
-    row = storage.get_node(session_id=sid, node_id="q1")
-    assert row["type"] == "question"
-    assert row["parent_id"] == "root_a"
-    assert row["parent_kind"] == "root"
+    assert result["node"]["id"] == "q1"
+    assert result["node"]["type"] == "question"
+    assert result["node"]["parent_id"] == "root_a"
+    assert result["node"]["parent_kind"] == "root"
+    assert result["node"]["status"] == "open"
 
 
 def test_add_node_under_node_records_parent_kind_node(storage: Storage) -> None:
@@ -440,3 +447,237 @@ def test_add_node_rejects_invalid_type_via_storage_constraint(storage: Storage) 
             now="2026-05-20T10:00:00Z",
             new_id=lambda p: "node_x",
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.5 tools
+# ---------------------------------------------------------------------------
+
+
+def test_set_focus_tool_updates_session(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_a",
+                   "type": "question", "text": "?"},
+        now="2026-05-20T10:01:00Z",
+        new_id=lambda p: "q1",
+    )
+
+    result = set_focus(
+        storage=storage,
+        arguments={"session_id": sid, "node_id": "q1"},
+        now="2026-05-20T11:00:00Z",
+    )
+
+    assert result == {"session_id": sid, "focus_node_id": "q1"}
+    row = storage.get_session(session_id=sid)
+    assert row["focus_node_id"] == "q1"
+
+
+def test_set_focus_tool_clears_focus_when_node_id_omitted(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_a",
+                   "type": "question", "text": "?"},
+        now="2026-05-20T10:01:00Z",
+        new_id=lambda p: "q1",
+    )
+    set_focus(
+        storage=storage,
+        arguments={"session_id": sid, "node_id": "q1"},
+        now="2026-05-20T11:00:00Z",
+    )
+
+    result = set_focus(
+        storage=storage,
+        arguments={"session_id": sid},
+        now="2026-05-20T12:00:00Z",
+    )
+
+    assert result["focus_node_id"] is None
+    row = storage.get_session(session_id=sid)
+    assert row["focus_node_id"] is None
+
+
+def test_set_root_lifecycle_tool_archives_root(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+
+    result = set_root_lifecycle(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": "root_a",
+                   "lifecycle": "archived"},
+        now="2026-05-20T11:00:00Z",
+    )
+
+    assert result == {"root_id": "root_a", "lifecycle": "archived"}
+    assert storage.list_active_roots(session_id=sid) == []
+
+
+def test_set_root_lifecycle_tool_rejects_invalid_lifecycle(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+
+    with pytest.raises(ValueError, match="lifecycle"):
+        set_root_lifecycle(
+            storage=storage,
+            arguments={"session_id": sid, "root_id": "root_a",
+                       "lifecycle": "bogus"},
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def test_set_root_lifecycle_tool_raises_when_root_missing(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+
+    with pytest.raises(ValueError, match="root"):
+        set_root_lifecycle(
+            storage=storage,
+            arguments={"session_id": sid, "root_id": "root_ghost",
+                       "lifecycle": "archived"},
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def test_list_open_nodes_tool_full_session(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+    for nid in ["q1", "q2"]:
+        add_node(
+            storage=storage,
+            arguments={"session_id": sid, "parent_id": "root_a",
+                       "type": "question", "text": "?"},
+            now="2026-05-20T10:01:00Z",
+            new_id=lambda p, _nid=nid: _nid,
+        )
+    close_node(
+        storage=storage,
+        arguments={"session_id": sid, "node_id": "q1",
+                   "closure_reason": "resolved"},
+        now="2026-05-20T10:30:00Z",
+    )
+
+    result = list_open_nodes(
+        storage=storage, arguments={"session_id": sid}
+    )
+
+    assert [n["id"] for n in result["nodes"]] == ["q2"]
+
+
+def test_list_open_nodes_tool_filtered_by_root(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+    # Add a second root
+    spawn_root(
+        storage=storage,
+        arguments={"session_id": sid, "topic": "B"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "root_b",
+    )
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_a",
+                   "type": "question", "text": "?"},
+        now="2026-05-20T10:01:00Z",
+        new_id=lambda p: "qa",
+    )
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_b",
+                   "type": "question", "text": "?"},
+        now="2026-05-20T10:02:00Z",
+        new_id=lambda p: "qb",
+    )
+
+    result = list_open_nodes(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": "root_a"},
+    )
+
+    assert [n["id"] for n in result["nodes"]] == ["qa"]
+
+
+def test_add_edge_and_list_edges_tools(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+
+    add_result = add_edge(
+        storage=storage,
+        arguments={
+            "session_id": sid,
+            "from_node": "node_x", "to_node": "node_y",
+            "type": "requires", "reason": "dep",
+        },
+        now="2026-05-20T11:00:00Z",
+    )
+
+    assert isinstance(add_result["edge_id"], int)
+
+    list_result = list_edges(
+        storage=storage, arguments={"session_id": sid}
+    )
+
+    assert len(list_result["edges"]) == 1
+    assert list_result["edges"][0]["from_node"] == "node_x"
+    assert list_result["edges"][0]["type"] == "requires"
+
+
+def test_accept_hypothesis_tool_with_rationale(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+    # Seed 3 hypothesis siblings under root_a
+    for nid in ["h1", "h2", "h3"]:
+        add_node(
+            storage=storage,
+            arguments={"session_id": sid, "parent_id": "root_a",
+                       "type": "hypothesis", "text": f"opt {nid}"},
+            now="2026-05-20T10:01:00Z",
+            new_id=lambda p, _nid=nid: _nid,
+        )
+
+    ids = iter(["d1", "r1"])
+    result = accept_hypothesis(
+        storage=storage,
+        arguments={
+            "session_id": sid, "hyp_id": "h2",
+            "decision_text": "Adopt h2",
+            "rationale_text": "Best fit for the constraints",
+        },
+        now="2026-05-20T11:00:00Z",
+        new_id=lambda p: next(ids),
+    )
+
+    assert result["hyp_id"] == "h2"
+    assert result["decision_id"] == "d1"
+    assert result["rationale_id"] == "r1"
+    assert set(result["closed_siblings"]) == {"h1", "h3"}
+
+    # State checks
+    h2 = storage.get_node(session_id=sid, node_id="h2")
+    assert h2["closure_reason"] == "resolved"
+    h1 = storage.get_node(session_id=sid, node_id="h1")
+    assert h1["closure_reason"] == "rejected"
+    d1 = storage.get_node(session_id=sid, node_id="d1")
+    assert d1["type"] == "decision"
+    r1 = storage.get_node(session_id=sid, node_id="r1")
+    assert r1["type"] == "rationale"
+    assert r1["parent_id"] == "d1"
+
+
+def test_accept_hypothesis_tool_without_rationale(storage: Storage) -> None:
+    sid = _start_with_root(storage)
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_a",
+                   "type": "hypothesis", "text": "h"},
+        now="2026-05-20T10:01:00Z",
+        new_id=lambda p: "h1",
+    )
+
+    ids = iter(["d1"])
+    result = accept_hypothesis(
+        storage=storage,
+        arguments={"session_id": sid, "hyp_id": "h1",
+                   "decision_text": "Adopt h1"},
+        now="2026-05-20T11:00:00Z",
+        new_id=lambda p: next(ids),
+    )
+
+    assert result["rationale_id"] is None
+    assert storage.get_node(session_id=sid, node_id="d1") is not None

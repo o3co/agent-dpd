@@ -10,7 +10,7 @@ import sqlite3
 from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 
 class Storage:
@@ -107,6 +107,15 @@ class Storage:
             "UPDATE sessions SET updated_at = ? WHERE id = ?",
             (now, session_id),
         )
+
+    def get_root(
+        self, *, session_id: str, root_id: str
+    ) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM roots WHERE session_id = ? AND id = ?",
+                (session_id, root_id),
+            ).fetchone()
 
     def insert_root(
         self,
@@ -243,6 +252,217 @@ class Storage:
             if cursor.rowcount > 0:
                 self._touch_session(conn, session_id=session_id, now=now)
             return cursor.rowcount > 0
+
+    def set_focus(
+        self,
+        *,
+        session_id: str,
+        node_id: str | None,
+        now: str,
+    ) -> None:
+        """Set or clear sessions.focus_node_id.
+
+        When ``node_id`` is not None, validates that the node exists in the
+        session. Always validates that the session exists. Bumps updated_at.
+        """
+        with self.connect() as conn:
+            if node_id is not None:
+                exists = conn.execute(
+                    "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
+                    (session_id, node_id),
+                ).fetchone()
+                if exists is None:
+                    raise ValueError(
+                        f"node {node_id!r} not found in session {session_id!r}"
+                    )
+            cursor = conn.execute(
+                "UPDATE sessions SET focus_node_id = ?, updated_at = ? WHERE id = ?",
+                (node_id, now, session_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(f"session {session_id!r} not found")
+
+    def set_root_lifecycle(
+        self,
+        *,
+        session_id: str,
+        root_id: str,
+        lifecycle: str,
+        now: str,
+    ) -> bool:
+        """Change a root's lifecycle. Returns True if a row was updated.
+
+        Lifecycle vocabulary is enforced by the DB-level CHECK constraint
+        (raises sqlite3.IntegrityError on invalid value).
+        """
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE roots SET lifecycle = ? WHERE session_id = ? AND id = ?",
+                (lifecycle, session_id, root_id),
+            )
+            if cursor.rowcount > 0:
+                self._touch_session(conn, session_id=session_id, now=now)
+            return cursor.rowcount > 0
+
+    def list_open_nodes(
+        self,
+        *,
+        session_id: str,
+        root_id: str | None = None,
+    ) -> list[sqlite3.Row]:
+        """Return open nodes in the session, optionally restricted to one root.
+
+        With ``root_id=None``, returns every node with status='open' in the
+        session (creation-order). With a root, walks that root's subtree and
+        filters to open nodes.
+        """
+        if root_id is None:
+            with self.connect() as conn:
+                return list(
+                    conn.execute(
+                        "SELECT * FROM nodes "
+                        "WHERE session_id = ? AND status = 'open' "
+                        "ORDER BY created_at, id",
+                        (session_id,),
+                    )
+                )
+        subtree = self.walk_subtree(session_id=session_id, root_id=root_id)
+        return [n for n in subtree if n["status"] == "open"]
+
+    def add_edge(
+        self,
+        *,
+        session_id: str,
+        from_node: str,
+        to_node: str,
+        edge_type: str,
+        reason: str | None,
+        now: str,
+    ) -> int:
+        """Insert an edge row. Returns the AUTOINCREMENT id."""
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO edges "
+                "(session_id, from_node, to_node, type, reason, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, from_node, to_node, edge_type, reason, now),
+            )
+            self._touch_session(conn, session_id=session_id, now=now)
+            return cursor.lastrowid
+
+    def accept_hypothesis(
+        self,
+        *,
+        session_id: str,
+        hyp_id: str,
+        decision_id: str,
+        decision_text: str,
+        rationale_id: str | None,
+        rationale_text: str | None,
+        now: str,
+    ) -> dict[str, Any]:
+        """Atomically resolve a hypothesis branch.
+
+        Steps run in a single transaction:
+            1. Close the target hypothesis as 'resolved'.
+            2. Close every sibling hypothesis (same parent, type='hypothesis',
+               status='open') as 'rejected'.
+            3. Insert a closed 'decision' node under the same parent (resolved).
+            4. If rationale_text is given, insert a closed 'rationale' node
+               under the decision (resolved).
+            5. Bump sessions.updated_at.
+
+        Returns ``{hyp_id, decision_id, rationale_id, closed_siblings}``.
+        Raises ValueError if the hypothesis is missing or not a hypothesis.
+        """
+        with self.connect() as conn:
+            hyp_row = conn.execute(
+                "SELECT parent_id, parent_kind, type FROM nodes "
+                "WHERE session_id = ? AND id = ?",
+                (session_id, hyp_id),
+            ).fetchone()
+            if hyp_row is None:
+                raise ValueError(
+                    f"hypothesis {hyp_id!r} not found in session {session_id!r}"
+                )
+            if hyp_row["type"] != "hypothesis":
+                raise ValueError(
+                    f"node {hyp_id!r} is type {hyp_row['type']!r}, not 'hypothesis'"
+                )
+            parent_id = hyp_row["parent_id"]
+            parent_kind = hyp_row["parent_kind"]
+
+            conn.execute(
+                "UPDATE nodes SET status='closed', closure_reason='resolved', "
+                "updated_at = ? WHERE session_id = ? AND id = ?",
+                (now, session_id, hyp_id),
+            )
+
+            sibling_rows = conn.execute(
+                "SELECT id FROM nodes "
+                "WHERE session_id = ? AND parent_id = ? AND parent_kind = ? "
+                "AND type = 'hypothesis' AND status = 'open' AND id != ?",
+                (session_id, parent_id, parent_kind, hyp_id),
+            ).fetchall()
+            closed_siblings: list[str] = []
+            for row in sibling_rows:
+                conn.execute(
+                    "UPDATE nodes SET status='closed', closure_reason='rejected', "
+                    "updated_at = ? WHERE session_id = ? AND id = ?",
+                    (now, session_id, row["id"]),
+                )
+                closed_siblings.append(row["id"])
+
+            conn.execute(
+                "INSERT INTO nodes "
+                "(id, session_id, type, text, status, closure_reason, "
+                " parent_id, parent_kind, created_at, updated_at) "
+                "VALUES (?, ?, 'decision', ?, 'closed', 'resolved', ?, ?, ?, ?)",
+                (decision_id, session_id, decision_text,
+                 parent_id, parent_kind, now, now),
+            )
+
+            if rationale_id is not None and rationale_text is not None:
+                conn.execute(
+                    "INSERT INTO nodes "
+                    "(id, session_id, type, text, status, closure_reason, "
+                    " parent_id, parent_kind, created_at, updated_at) "
+                    "VALUES (?, ?, 'rationale', ?, 'closed', 'resolved', "
+                    "        ?, 'node', ?, ?)",
+                    (rationale_id, session_id, rationale_text,
+                     decision_id, now, now),
+                )
+
+            self._touch_session(conn, session_id=session_id, now=now)
+
+            return {
+                "hyp_id": hyp_id,
+                "decision_id": decision_id,
+                "rationale_id": rationale_id,
+                "closed_siblings": closed_siblings,
+            }
+
+    def list_edges(
+        self,
+        *,
+        session_id: str,
+        from_node: str | None = None,
+    ) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            if from_node is None:
+                return list(
+                    conn.execute(
+                        "SELECT * FROM edges WHERE session_id = ? ORDER BY id",
+                        (session_id,),
+                    )
+                )
+            return list(
+                conn.execute(
+                    "SELECT * FROM edges "
+                    "WHERE session_id = ? AND from_node = ? ORDER BY id",
+                    (session_id, from_node),
+                )
+            )
 
     def walk_subtree(
         self, *, session_id: str, root_id: str

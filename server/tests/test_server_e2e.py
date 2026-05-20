@@ -97,8 +97,9 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
         root_payload = call_tool(3, "spawn_root", {
             "session_id": session_id, "topic": "T", "reason": "R",
         })
-        root_id = root_payload["root_id"]
+        root_id = root_payload["root"]["id"]
         assert root_id.startswith("root_")
+        assert root_payload["root"]["topic"] == "T"
 
         walk_payload = call_tool(4, "walk_subtree", {
             "session_id": session_id, "root_id": root_id,
@@ -116,6 +117,61 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
         assert state_payload["session"]["id"] == session_id
         assert [r["id"] for r in state_payload["active_roots"]] == [root_id]
         assert state_payload["focus_node"] is None
+
+        # Phase 2.5 tool surface: spawn 3 hypotheses under the root, then
+        # use accept_hypothesis to atomically resolve one branch.
+        hyp_ids = []
+        for i in range(3):
+            payload = call_tool(7 + i, "add_node", {
+                "session_id": session_id, "parent_id": root_id,
+                "type": "hypothesis", "text": f"option {i}",
+            })
+            hyp_ids.append(payload["node"]["id"])
+
+        accept_payload = call_tool(10, "accept_hypothesis", {
+            "session_id": session_id, "hyp_id": hyp_ids[1],
+            "decision_text": "Adopt option 1",
+            "rationale_text": "Best fit",
+        })
+        assert accept_payload["hyp_id"] == hyp_ids[1]
+        assert set(accept_payload["closed_siblings"]) == {hyp_ids[0], hyp_ids[2]}
+        assert accept_payload["decision_id"].startswith("node_")
+        assert accept_payload["rationale_id"].startswith("node_")
+
+        # set_focus then read state back to confirm round-trip.
+        call_tool(11, "set_focus", {
+            "session_id": session_id, "node_id": accept_payload["decision_id"],
+        })
+        refreshed = call_tool(12, "get_session_state", {
+            "session_id": session_id,
+        })
+        assert refreshed["focus_node"]["id"] == accept_payload["decision_id"]
+
+        # list_open_nodes after closure — only nodes outside the closed branch.
+        open_nodes = call_tool(13, "list_open_nodes", {
+            "session_id": session_id, "root_id": root_id,
+        })
+        assert open_nodes["nodes"] == []
+
+        # archive the root and confirm it disappears from list_active_roots.
+        call_tool(14, "set_root_lifecycle", {
+            "session_id": session_id, "root_id": root_id,
+            "lifecycle": "archived",
+        })
+        active = call_tool(15, "list_active_roots", {
+            "session_id": session_id,
+        })
+        assert active == {"roots": []}
+
+        # add_edge + list_edges round-trip.
+        call_tool(16, "add_edge", {
+            "session_id": session_id,
+            "from_node": accept_payload["decision_id"],
+            "to_node": root_id, "type": "derived_from",
+        })
+        edges = call_tool(17, "list_edges", {"session_id": session_id})
+        assert len(edges["edges"]) == 1
+        assert edges["edges"][0]["type"] == "derived_from"
 
         # Side-effect: sqlite was created under DPD_DATA_DIR.
         expected = data_dir / str(agent_root).replace("/", "-") / "graph.sqlite"
