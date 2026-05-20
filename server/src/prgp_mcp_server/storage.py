@@ -31,12 +31,18 @@ class Storage:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        """Yield a sqlite connection with foreign keys enabled."""
+        """Yield a sqlite connection with foreign keys enabled.
+
+        Commits on clean exit, rolls back on exception, always closes.
+        """
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()

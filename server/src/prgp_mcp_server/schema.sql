@@ -1,6 +1,9 @@
 -- PRGP server schema (Phase 1).
 -- See spec §3 (Data Model) and §5 (Storage Architecture).
 
+-- NOTE: PRAGMA foreign_keys is a per-connection toggle; this line has no
+-- persistent effect after schema apply. FK enforcement is set in
+-- Storage.connect() on every new connection.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -52,3 +55,6 @@ CREATE TABLE IF NOT EXISTS edges (
 
 CREATE INDEX IF NOT EXISTS idx_edges_session ON edges(session_id);
 CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(session_id, from_node);
+
+-- Schema version sentinel; bump in lock-step with `Storage.open()` migrations.
+PRAGMA user_version = 1;
