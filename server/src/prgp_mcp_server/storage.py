@@ -24,6 +24,7 @@ class Storage:
         """Create or open the database, applying schema and enabling WAL."""
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(db_path) as conn:
+            conn.execute("PRAGMA busy_timeout = 5000")
             conn.execute("PRAGMA journal_mode = WAL")
             schema = files("prgp_mcp_server").joinpath("schema.sql").read_text()
             conn.executescript(schema)
@@ -34,10 +35,13 @@ class Storage:
         """Yield a sqlite connection with foreign keys enabled.
 
         Commits on clean exit, rolls back on exception, always closes.
+        Sets busy_timeout to 5000ms so concurrent stdio servers don't
+        immediately fail under WAL writer contention.
         """
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
         try:
             yield conn
             conn.commit()
