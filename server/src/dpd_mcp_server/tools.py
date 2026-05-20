@@ -144,6 +144,43 @@ def list_active_roots(
     return {"roots": [_row_to_dict(r) for r in rows]}
 
 
+def list_sessions(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    scope = arguments.get("scope") or None
+    rows = storage.list_sessions(scope=scope)
+    return {"sessions": [_row_to_dict(r) for r in rows]}
+
+
+def get_session_state(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Return session row + active roots + focus_node (resolved).
+
+    Composes the three storage primitives needed by the skill startup
+    brief (§8.3 step 7). focus_node is null when focus_node_id is unset.
+    """
+    session_id = _required(arguments, "session_id")
+    session_row = storage.get_session(session_id=session_id)
+    if session_row is None:
+        raise ValueError(f"session {session_id!r} not found")
+    roots = storage.list_active_roots(session_id=session_id)
+    focus_node = None
+    focus_id = session_row["focus_node_id"]
+    if focus_id is not None:
+        node_row = storage.get_node(session_id=session_id, node_id=focus_id)
+        focus_node = _row_to_dict(node_row) if node_row is not None else None
+    return {
+        "session": _row_to_dict(session_row),
+        "active_roots": [_row_to_dict(r) for r in roots],
+        "focus_node": focus_node,
+    }
+
+
 def _required(arguments: dict[str, Any], key: str) -> Any:
     value = arguments.get(key)
     if value is None or value == "":

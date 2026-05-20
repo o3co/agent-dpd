@@ -9,7 +9,9 @@ from dpd_mcp_server.tools import (
     add_node,
     close_node,
     get_node,
+    get_session_state,
     list_active_roots,
+    list_sessions,
     spawn_root,
     start_session,
     walk_subtree,
@@ -47,6 +49,122 @@ def test_start_session_scope_and_label_optional(storage: Storage) -> None:
     row = storage.get_session(session_id=result["session_id"])
     assert row["scope"] is None
     assert row["label"] is None
+
+
+def test_list_sessions_filters_by_scope(storage: Storage) -> None:
+    storage.insert_session(
+        session_id="ses_a", scope="alpha", label="A",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_session(
+        session_id="ses_b", scope="beta", label=None,
+        now="2026-05-20T10:01:00Z",
+    )
+
+    result = list_sessions(storage=storage, arguments={"scope": "alpha"})
+
+    assert [s["id"] for s in result["sessions"]] == ["ses_a"]
+    assert result["sessions"][0]["scope"] == "alpha"
+    assert result["sessions"][0]["label"] == "A"
+
+
+def test_get_session_state_returns_session_plus_active_roots(
+    storage: Storage,
+) -> None:
+    start_session(
+        storage=storage,
+        arguments={"scope": "decompose-propagate.protocol", "label": "exp"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "ses_1",
+    )
+    spawn_root(
+        storage=storage,
+        arguments={"session_id": "ses_1", "topic": "MCP arch"},
+        now="2026-05-20T10:01:00Z",
+        new_id=lambda p: "root_a",
+    )
+    spawn_root(
+        storage=storage,
+        arguments={"session_id": "ses_1", "topic": "Storage"},
+        now="2026-05-20T10:02:00Z",
+        new_id=lambda p: "root_b",
+    )
+
+    result = get_session_state(
+        storage=storage, arguments={"session_id": "ses_1"}
+    )
+
+    assert result["session"]["id"] == "ses_1"
+    assert result["session"]["scope"] == "decompose-propagate.protocol"
+    assert result["session"]["label"] == "exp"
+    assert result["session"]["focus_node_id"] is None
+    assert [r["id"] for r in result["active_roots"]] == ["root_a", "root_b"]
+    assert result["focus_node"] is None
+
+
+def test_get_session_state_resolves_focus_node_when_set(storage: Storage) -> None:
+    start_session(
+        storage=storage, arguments={}, now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "ses_1",
+    )
+    spawn_root(
+        storage=storage,
+        arguments={"session_id": "ses_1", "topic": "t"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "root_a",
+    )
+    add_node(
+        storage=storage,
+        arguments={
+            "session_id": "ses_1", "parent_id": "root_a",
+            "type": "question", "text": "Should X?",
+        },
+        now="2026-05-20T10:01:00Z",
+        new_id=lambda p: "q1",
+    )
+    with storage.connect() as conn:
+        conn.execute(
+            "UPDATE sessions SET focus_node_id = ? WHERE id = ?",
+            ("q1", "ses_1"),
+        )
+
+    result = get_session_state(
+        storage=storage, arguments={"session_id": "ses_1"}
+    )
+
+    assert result["focus_node"] is not None
+    assert result["focus_node"]["id"] == "q1"
+    assert result["focus_node"]["text"] == "Should X?"
+
+
+def test_get_session_state_raises_when_session_missing(storage: Storage) -> None:
+    with pytest.raises(ValueError, match="not found"):
+        get_session_state(
+            storage=storage, arguments={"session_id": "ses_missing"}
+        )
+
+
+def test_get_session_state_requires_session_id(storage: Storage) -> None:
+    with pytest.raises(ValueError, match="session_id"):
+        get_session_state(storage=storage, arguments={})
+
+
+def test_list_sessions_empty_scope_means_top_level(storage: Storage) -> None:
+    storage.insert_session(
+        session_id="ses_top", scope=None, label=None,
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_session(
+        session_id="ses_sub", scope="some.scope", label=None,
+        now="2026-05-20T10:01:00Z",
+    )
+
+    # Both missing key and empty string normalize to None → top-level only.
+    via_missing = list_sessions(storage=storage, arguments={})
+    via_empty = list_sessions(storage=storage, arguments={"scope": ""})
+
+    assert [s["id"] for s in via_missing["sessions"]] == ["ses_top"]
+    assert [s["id"] for s in via_empty["sessions"]] == ["ses_top"]
 
 
 def test_spawn_root_creates_active_root(storage: Storage) -> None:

@@ -1,4 +1,4 @@
-"""MCP server wiring: register the 7 DPD tools over stdio."""
+"""MCP server wiring: register the 9 DPD tools over stdio."""
 
 from __future__ import annotations
 
@@ -210,6 +210,49 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="list_sessions",
+            title="List sessions",
+            description=(
+                "List sessions for the given sub-scope, most-recently-updated first. "
+                "Omit (or pass empty/null) ``scope`` to list top-level sessions only "
+                "(rows with NULL scope). Used by the skill startup flow to offer "
+                "resume vs new-session UX."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": ["string", "null"],
+                        "description": "Sub-scope to filter by. Omit or pass null/empty for top-level sessions only.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="get_session_state",
+            title="Get session state",
+            description=(
+                "Return a session's row plus its active roots and resolved focus_node "
+                "(null when focus_node_id is unset). Used by the skill startup flow "
+                "to brief the AI on resume."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -242,6 +285,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.walk_subtree(storage=storage, arguments=tool_args)
     if name == "list_active_roots":
         return tools.list_active_roots(storage=storage, arguments=tool_args)
+    if name == "list_sessions":
+        return tools.list_sessions(storage=storage, arguments=tool_args)
+    if name == "get_session_state":
+        return tools.get_session_state(storage=storage, arguments=tool_args)
 
     raise ValueError(f"unknown tool: {name}")
 

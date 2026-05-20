@@ -74,6 +74,28 @@ class Storage:
                 "SELECT * FROM sessions WHERE id = ?", (session_id,)
             ).fetchone()
 
+    def list_sessions(self, *, scope: str | None) -> list[sqlite3.Row]:
+        """Return sessions for the given sub-scope, most-recently-updated first.
+
+        ``scope=None`` matches only top-level sessions (rows with NULL scope),
+        not "all sessions" — sub-scope and top-level are kept distinct so the
+        skill startup flow (§8.3 step 3) can list exactly the candidates for
+        the cwd-resolved scope.
+        """
+        with self.connect() as conn:
+            if scope is None:
+                cursor = conn.execute(
+                    "SELECT * FROM sessions WHERE scope IS NULL "
+                    "ORDER BY updated_at DESC, id"
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM sessions WHERE scope = ? "
+                    "ORDER BY updated_at DESC, id",
+                    (scope,),
+                )
+            return list(cursor)
+
     def insert_root(
         self,
         *,

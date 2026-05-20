@@ -47,6 +47,67 @@ def test_insert_session_round_trips_through_get(tmp_db_path: str) -> None:
     assert row["focus_node_id"] is None
 
 
+def test_list_sessions_empty(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    assert storage.list_sessions(scope="some.scope") == []
+
+
+def test_list_sessions_filters_by_scope(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_a", scope="alpha", label=None,
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_session(
+        session_id="ses_b", scope="beta", label=None,
+        now="2026-05-20T10:01:00Z",
+    )
+    storage.insert_session(
+        session_id="ses_c", scope="alpha", label=None,
+        now="2026-05-20T10:02:00Z",
+    )
+
+    rows = storage.list_sessions(scope="alpha")
+
+    assert {r["id"] for r in rows} == {"ses_a", "ses_c"}
+
+
+def test_list_sessions_scope_none_returns_top_level_only(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_top", scope=None, label=None,
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_session(
+        session_id="ses_sub", scope="some.scope", label=None,
+        now="2026-05-20T10:01:00Z",
+    )
+
+    rows = storage.list_sessions(scope=None)
+
+    assert [r["id"] for r in rows] == ["ses_top"]
+
+
+def test_list_sessions_sorted_by_updated_at_desc(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_old", scope="x", label=None,
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_session(
+        session_id="ses_mid", scope="x", label=None,
+        now="2026-05-20T11:00:00Z",
+    )
+    storage.insert_session(
+        session_id="ses_new", scope="x", label=None,
+        now="2026-05-20T12:00:00Z",
+    )
+
+    rows = storage.list_sessions(scope="x")
+
+    assert [r["id"] for r in rows] == ["ses_new", "ses_mid", "ses_old"]
+
+
 def test_insert_root_and_list_active_roots(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     storage.insert_session(

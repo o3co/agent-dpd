@@ -106,6 +106,17 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
         # Newly spawned root has no children yet.
         assert walk_payload == {"nodes": []}
 
+        # Skill startup flow: list_sessions then get_session_state for resume.
+        list_payload = call_tool(5, "list_sessions", {})
+        assert [s["id"] for s in list_payload["sessions"]] == [session_id]
+
+        state_payload = call_tool(6, "get_session_state", {
+            "session_id": session_id,
+        })
+        assert state_payload["session"]["id"] == session_id
+        assert [r["id"] for r in state_payload["active_roots"]] == [root_id]
+        assert state_payload["focus_node"] is None
+
         # Side-effect: sqlite was created under DPD_DATA_DIR.
         expected = data_dir / str(agent_root).replace("/", "-") / "graph.sqlite"
         assert expected.exists()
