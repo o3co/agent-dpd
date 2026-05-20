@@ -28,7 +28,7 @@ log = logging.getLogger("prgp-server")
 
 app = Server("prgp-mcp-server")
 
-_storage: Storage | None = None
+_storages: dict[str, Storage] = {}
 
 
 def _now_iso() -> str:
@@ -42,29 +42,37 @@ def _data_dir() -> Path:
     return Path.home() / ".claude" / "prgp-server" / "data"
 
 
-async def _get_storage() -> Storage:
-    """Resolve agent scope from MCP roots and open (lazily) the sqlite db."""
-    global _storage
-    if _storage is not None:
-        return _storage
+async def _get_storage(arguments: dict) -> Storage:
+    """Resolve agent scope and open (lazily) the sqlite db.
 
-    session = app.request_context.session
-    if (
-        session.client_params is None
-        or session.client_params.capabilities.roots is None
-    ):
-        raise AgentScopeResolutionError(
-            "client did not advertise roots capability"
-        )
+    If ``arguments`` contains a non-empty ``agent_scope`` key, use it
+    directly as the encoded scope name, bypassing ``roots/list``.
+    Otherwise resolve via the MCP roots capability.  Results are cached
+    per encoded scope name.
+    """
+    explicit = arguments.get("agent_scope")
+    if explicit:
+        encoded = explicit
+    else:
+        session = app.request_context.session
+        if (
+            session.client_params is None
+            or session.client_params.capabilities.roots is None
+        ):
+            raise AgentScopeResolutionError(
+                "client did not advertise roots capability"
+            )
 
-    roots_result = await session.list_roots()
-    roots = [str(r.uri) for r in roots_result.roots]
-    encoded = resolve_agent_scope(roots)
+        roots_result = await session.list_roots()
+        roots = [str(r.uri) for r in roots_result.roots]
+        encoded = resolve_agent_scope(roots)
+        log.info("resolved agent scope: encoded=%s roots=%s", encoded, roots)
 
-    db_path = _data_dir() / encoded / "graph.sqlite"
-    log.info("opening sqlite at %s", db_path)
-    _storage = Storage.open(str(db_path))
-    return _storage
+    if encoded not in _storages:
+        db_path = _data_dir() / encoded / "graph.sqlite"
+        log.info("opening sqlite at %s", db_path)
+        _storages[encoded] = Storage.open(str(db_path))
+    return _storages[encoded]
 
 
 @app.list_tools()
@@ -81,6 +89,10 @@ async def list_tools() -> list[types.Tool]:
                               "description": "Sub-scope identifier (optional)."},
                     "label": {"type": ["string", "null"],
                               "description": "Human-readable label (optional)."},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
                 },
             },
         ),
@@ -95,6 +107,10 @@ async def list_tools() -> list[types.Tool]:
                     "session_id": {"type": "string"},
                     "topic": {"type": "string"},
                     "reason": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
                 },
             },
         ),
@@ -110,6 +126,10 @@ async def list_tools() -> list[types.Tool]:
                     "parent_id": {"type": "string"},
                     "type": {"type": "string"},
                     "text": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
                 },
             },
         ),
@@ -127,6 +147,10 @@ async def list_tools() -> list[types.Tool]:
                         "type": "string",
                         "enum": ["resolved", "rejected", "invalidated"],
                     },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
                 },
             },
         ),
@@ -140,6 +164,10 @@ async def list_tools() -> list[types.Tool]:
                 "properties": {
                     "session_id": {"type": "string"},
                     "node_id": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
                 },
             },
         ),
@@ -156,6 +184,10 @@ async def list_tools() -> list[types.Tool]:
                 "properties": {
                     "session_id": {"type": "string"},
                     "root_id": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
                 },
             },
         ),
@@ -169,7 +201,13 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "required": ["session_id"],
-                "properties": {"session_id": {"type": "string"}},
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
             },
         ),
     ]
@@ -177,31 +215,33 @@ async def list_tools() -> list[types.Tool]:
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    storage = await _get_storage()
+    storage = await _get_storage(arguments)
     now = _now_iso()
+    # Strip the routing-only control argument before passing to tool functions.
+    tool_args = {k: v for k, v in arguments.items() if k != "agent_scope"}
 
     if name == "start_session":
         return tools.start_session(
-            storage=storage, arguments=arguments, now=now, new_id=new_id
+            storage=storage, arguments=tool_args, now=now, new_id=new_id
         )
     if name == "spawn_root":
         return tools.spawn_root(
-            storage=storage, arguments=arguments, now=now, new_id=new_id
+            storage=storage, arguments=tool_args, now=now, new_id=new_id
         )
     if name == "add_node":
         return tools.add_node(
-            storage=storage, arguments=arguments, now=now, new_id=new_id
+            storage=storage, arguments=tool_args, now=now, new_id=new_id
         )
     if name == "close_node":
         return tools.close_node(
-            storage=storage, arguments=arguments, now=now
+            storage=storage, arguments=tool_args, now=now
         )
     if name == "get_node":
-        return tools.get_node(storage=storage, arguments=arguments)
+        return tools.get_node(storage=storage, arguments=tool_args)
     if name == "walk_subtree":
-        return tools.walk_subtree(storage=storage, arguments=arguments)
+        return tools.walk_subtree(storage=storage, arguments=tool_args)
     if name == "list_active_roots":
-        return tools.list_active_roots(storage=storage, arguments=arguments)
+        return tools.list_active_roots(storage=storage, arguments=tool_args)
 
     raise ValueError(f"unknown tool: {name}")
 
