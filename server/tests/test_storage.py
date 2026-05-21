@@ -1546,3 +1546,53 @@ def test_resolve_branch_derived_from_allows_root_as_target(tmp_db_path: str) -> 
     )
     assert len(result["edges_created"]) == 1
     assert result["edges_created"][0]["to_node"] == "root_a"
+
+
+def test_resolve_branch_rejects_unknown_parent_in_decision_only(tmp_db_path: str) -> None:
+    """Decision-only path (results=[]) must validate parent existence —
+    Multi-agent review (Claude + Codex) convergent must-fix.
+    """
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)  # gives root_a + h1/h2/h3
+
+    with pytest.raises(ValueError, match="parent root 'totally_bogus' not found"):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="totally_bogus",
+            parent_kind="root",
+            results=[],
+            decision_id="d1",
+            decision_text="orphan attempt",
+            rationale_id=None,
+            rationale_text=None,
+            derived_from_node_ids=None,
+            now="2026-05-21T11:00:00Z",
+        )
+    # Decision must not have been inserted
+    assert storage.get_node(session_id="ses_1", node_id="d1") is None
+
+
+def test_resolve_branch_rejects_unknown_parent_with_results(tmp_db_path: str) -> None:
+    """Same parent check applies even when results are provided — earlier path
+    also relied on the loop to catch this indirectly via direct-child check,
+    but the unified check is clearer.
+    """
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    with pytest.raises(ValueError, match="parent root 'totally_bogus' not found"):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="totally_bogus",
+            parent_kind="root",
+            results=[{"node_id": "h1", "closure_reason": "resolved"}],
+            decision_id="d1",
+            decision_text="x",
+            rationale_id=None,
+            rationale_text=None,
+            derived_from_node_ids=None,
+            now="2026-05-21T11:00:00Z",
+        )
+    # h1 must still be open (rollback)
+    h1 = storage.get_node(session_id="ses_1", node_id="h1")
+    assert h1["status"] == "open"

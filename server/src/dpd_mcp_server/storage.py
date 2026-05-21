@@ -520,6 +520,29 @@ class Storage:
             )
 
         with self.connect() as conn:
+            # Validate parent_id + parent_kind exist in session.
+            # Polymorphic parent: roots table for parent_kind="root",
+            # nodes table for parent_kind="node".
+            if parent_kind == "root":
+                parent_exists = conn.execute(
+                    "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                    (session_id, parent_id),
+                ).fetchone()
+            elif parent_kind == "node":
+                parent_exists = conn.execute(
+                    "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
+                    (session_id, parent_id),
+                ).fetchone()
+            else:
+                raise ValueError(
+                    f"parent_kind must be 'root' or 'node', got {parent_kind!r}"
+                )
+            if parent_exists is None:
+                raise ValueError(
+                    f"parent {parent_kind} {parent_id!r} not found in "
+                    f"session {session_id!r}"
+                )
+
             closed_nodes: list[dict] = []
             for item in results:
                 node_id = item["node_id"]
