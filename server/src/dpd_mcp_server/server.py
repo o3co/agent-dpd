@@ -455,6 +455,47 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="resolve_branch",
+            title="Resolve branch (generic)",
+            description=(
+                "Atomically close N sibling nodes with per-node "
+                "closure_reason, optionally inserting a decision, rationale, "
+                "and derived_from edges. Generic counterpart to "
+                "resolve_hypothesis_branch (which is locked to "
+                "select-1-of-N). See spec Phase 2.7 §2 for full contract."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "parent_id", "parent_kind", "results"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "parent_id": {"type": "string"},
+                    "parent_kind": {"type": "string", "enum": ["root", "node"]},
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["node_id", "closure_reason"],
+                            "properties": {
+                                "node_id": {"type": "string"},
+                                "closure_reason": {"type": "string"},
+                            },
+                        },
+                    },
+                    "decision_text": {"type": ["string", "null"]},
+                    "rationale_text": {"type": ["string", "null"]},
+                    "derived_from_node_ids": {
+                        "type": ["array", "null"],
+                        "items": {"type": "string"},
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
             name="resolve_hypothesis_branch",
             title="Accept hypothesis (atomic decision)",
             description=(
@@ -540,6 +581,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.export_yaml(storage=storage, arguments=tool_args)
     if name == "resolve_hypothesis_branch":
         return tools.resolve_hypothesis_branch(
+            storage=storage, arguments=tool_args, now=now, new_id=new_id
+        )
+    if name == "resolve_branch":
+        return tools.resolve_branch(
             storage=storage, arguments=tool_args, now=now, new_id=new_id
         )
 

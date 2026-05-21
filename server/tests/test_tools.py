@@ -6,6 +6,7 @@ import pytest
 
 from dpd_mcp_server.storage import Storage
 from dpd_mcp_server.tools import (
+    resolve_branch,
     resolve_hypothesis_branch,
     add_edge,
     add_node,
@@ -951,3 +952,82 @@ def test_resolve_hypothesis_branch_tool_without_rationale(storage: Storage) -> N
 
     assert result["rationale_id"] is None
     assert storage.get_node(session_id=sid, node_id="d1") is not None
+
+
+# ---------------------------------------------------------------------------
+# resolve_branch tool tests
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_branch_tool_all_true(storage: Storage) -> None:
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-21T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-21T10:00:00Z",
+    )
+    for nid in ["h1", "h2"]:
+        storage.insert_node(
+            node_id=nid, session_id="ses_1", node_type="hypothesis",
+            text=f"opt {nid}", parent_id="root_a", parent_kind="root",
+            now="2026-05-21T10:01:00Z",
+        )
+
+    counter = {"n": 0}
+    def fake_new_id(prefix: str) -> str:
+        counter["n"] += 1
+        return f"{prefix}_{counter['n']}"
+
+    result = resolve_branch(
+        storage=storage,
+        arguments={
+            "session_id": "ses_1",
+            "parent_id": "root_a",
+            "parent_kind": "root",
+            "results": [
+                {"node_id": "h1", "closure_reason": "resolved"},
+                {"node_id": "h2", "closure_reason": "resolved"},
+            ],
+            "decision_text": "both confirmed",
+            "derived_from_node_ids": ["h1", "h2"],
+        },
+        now="2026-05-21T11:00:00Z",
+        new_id=fake_new_id,
+    )
+
+    assert sorted(result["closed_node_ids"]) == ["h1", "h2"]
+    assert result["decision_id"] is not None
+    assert result["rationale_id"] is None
+    assert len(result["derived_from_edge_ids"]) == 2
+
+
+def test_resolve_branch_tool_validates_closure_reason(storage: Storage) -> None:
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-21T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-21T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="h1", session_id="ses_1", node_type="hypothesis",
+        text="x", parent_id="root_a", parent_kind="root",
+        now="2026-05-21T10:01:00Z",
+    )
+
+    with pytest.raises(ValueError, match="closure_reason"):
+        resolve_branch(
+            storage=storage,
+            arguments={
+                "session_id": "ses_1",
+                "parent_id": "root_a",
+                "parent_kind": "root",
+                "results": [
+                    {"node_id": "h1", "closure_reason": "bogus"},
+                ],
+                "decision_text": "x",
+            },
+            now="2026-05-21T11:00:00Z",
+            new_id=lambda p: f"{p}_x",
+        )

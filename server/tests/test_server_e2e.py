@@ -208,3 +208,120 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
     finally:
         proc.terminate()
         proc.wait(timeout=5)
+
+
+@pytest.mark.timeout(15)
+def test_resolve_branch_through_stdio(tmp_path: Path) -> None:
+    """Smoke-test resolve_branch: all-true verdict + decision + derived_from edges."""
+    agent_root = tmp_path / "fake-agent"
+    agent_root.mkdir()
+    (agent_root / "Makefile").write_text("# marker")
+    (agent_root / "AGENTS.md").write_text("# marker")
+
+    data_dir = tmp_path / "dpd-data"
+    env = {
+        "DPD_DATA_DIR": str(data_dir),
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+    }
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "dpd_mcp_server"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        cwd=str(agent_root),
+    )
+
+    def send(obj: dict) -> None:
+        assert proc.stdin is not None
+        proc.stdin.write((json.dumps(obj) + "\n").encode())
+        proc.stdin.flush()
+
+    def recv() -> dict:
+        assert proc.stdout is not None
+        line = proc.stdout.readline().decode()
+        if not line:
+            stderr = proc.stderr.read().decode() if proc.stderr else ""
+            raise RuntimeError(
+                f"Server process closed stdout (likely crashed). stderr:\n{stderr}"
+            )
+        return json.loads(line)
+
+    def respond_roots(request_id: int) -> None:
+        send({
+            "jsonrpc": "2.0", "id": request_id,
+            "result": {"roots": [{
+                "uri": f"file://{agent_root}", "name": "fake"
+            }]},
+        })
+
+    def call_tool(call_id: int, name: str, arguments: dict) -> dict:
+        send({
+            "jsonrpc": "2.0", "id": call_id, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        })
+        while True:
+            m = recv()
+            if m.get("id") == call_id and "result" in m:
+                return json.loads(m["result"]["content"][0]["text"])
+            if m.get("method") == "roots/list":
+                respond_roots(m["id"])
+            else:
+                raise AssertionError(f"unexpected message: {m}")
+
+    try:
+        send({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"roots": {"listChanged": False}},
+                "clientInfo": {"name": "e2e-test", "version": "0"},
+            },
+        })
+        init_resp = recv()
+        assert init_resp["id"] == 1
+        assert "result" in init_resp
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+        session_id = call_tool(2, "start_session", {})["session_id"]
+        root_id = call_tool(3, "spawn_root", {
+            "session_id": session_id, "topic": "all-true test",
+        })["root"]["id"]
+
+        hyp_ids = []
+        for i in range(3):
+            payload = call_tool(4 + i, "add_node", {
+                "session_id": session_id, "parent_id": root_id,
+                "type": "hypothesis", "text": f"option {i}",
+            })
+            hyp_ids.append(payload["node"]["id"])
+
+        result = call_tool(7, "resolve_branch", {
+            "session_id": session_id,
+            "parent_id": root_id,
+            "parent_kind": "root",
+            "results": [
+                {"node_id": hyp_ids[0], "closure_reason": "resolved"},
+                {"node_id": hyp_ids[1], "closure_reason": "resolved"},
+                {"node_id": hyp_ids[2], "closure_reason": "resolved"},
+            ],
+            "decision_text": "all confirmed",
+            "derived_from_node_ids": hyp_ids,
+        })
+        assert sorted(result["closed_node_ids"]) == sorted(hyp_ids)
+        assert result["decision_id"].startswith("node_")
+        assert result["rationale_id"] is None
+        assert len(result["derived_from_edge_ids"]) == 3
+
+        edges = call_tool(8, "list_edges", {
+            "session_id": session_id,
+            "from_node": result["decision_id"],
+            "type": "derived_from",
+        })
+        assert len(edges["edges"]) == 3
+        assert sorted(e["to_node"] for e in edges["edges"]) == sorted(hyp_ids)
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)

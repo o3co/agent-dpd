@@ -483,6 +483,113 @@ class Storage:
                 "derived_from_edge_id": derived_from_edge_id,
             }
 
+    def resolve_branch(
+        self,
+        *,
+        session_id: str,
+        parent_id: str,
+        parent_kind: str,  # "root" | "node"
+        results: list[dict],  # [{"node_id": str, "closure_reason": str}]
+        decision_id: str | None,
+        decision_text: str | None,
+        rationale_id: str | None,
+        rationale_text: str | None,
+        derived_from_node_ids: list[str] | None,
+        now: str,
+    ) -> dict[str, Any]:
+        """Atomically close N sibling nodes with per-node closure_reason and
+        optionally insert decision + rationale + derived_from edges.
+
+        Validation (all rolled back atomically on failure):
+        - Each results[].node_id exists in session, status=open,
+          is a direct child of parent_id with matching parent_kind.
+        - results may be empty only when decision_text is provided.
+        - If decision_text is None, rationale_text must also be None.
+        """
+        if decision_text is None and rationale_text is not None:
+            raise ValueError(
+                "rationale_text requires decision_text to be set"
+            )
+        if not results and decision_text is None:
+            raise ValueError(
+                "resolve_branch requires either results or decision_text"
+            )
+
+        with self.connect() as conn:
+            closed_node_ids: list[str] = []
+            for item in results:
+                node_id = item["node_id"]
+                closure_reason = item["closure_reason"]
+                row = conn.execute(
+                    "SELECT parent_id, parent_kind, status FROM nodes "
+                    "WHERE session_id = ? AND id = ?",
+                    (session_id, node_id),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(
+                        f"node {node_id!r} not found in session {session_id!r}"
+                    )
+                if row["status"] != "open":
+                    raise ValueError(
+                        f"node {node_id!r} is not open (status={row['status']!r})"
+                    )
+                if row["parent_id"] != parent_id or row["parent_kind"] != parent_kind:
+                    raise ValueError(
+                        f"node {node_id!r} is not a direct child of "
+                        f"{parent_kind} {parent_id!r}"
+                    )
+                conn.execute(
+                    "UPDATE nodes SET status='closed', closure_reason=?, "
+                    "updated_at = ? WHERE session_id = ? AND id = ?",
+                    (closure_reason, now, session_id, node_id),
+                )
+                closed_node_ids.append(node_id)
+
+            if decision_text is not None and decision_id is not None:
+                conn.execute(
+                    "INSERT INTO nodes "
+                    "(id, session_id, type, text, status, closure_reason, "
+                    " parent_id, parent_kind, created_at, updated_at) "
+                    "VALUES (?, ?, 'decision', ?, 'closed', 'resolved', ?, ?, ?, ?)",
+                    (decision_id, session_id, decision_text,
+                     parent_id, parent_kind, now, now),
+                )
+
+            derived_from_edge_ids: list[int] = []
+            if derived_from_node_ids and decision_id is not None:
+                for target in derived_from_node_ids:
+                    cur = conn.execute(
+                        "INSERT INTO edges "
+                        "(session_id, from_node, to_node, type, reason, created_at) "
+                        "VALUES (?, ?, ?, 'derived_from', NULL, ?)",
+                        (session_id, decision_id, target, now),
+                    )
+                    derived_from_edge_ids.append(cur.lastrowid)
+
+            if (
+                rationale_id is not None
+                and rationale_text is not None
+                and decision_id is not None
+            ):
+                conn.execute(
+                    "INSERT INTO nodes "
+                    "(id, session_id, type, text, status, closure_reason, "
+                    " parent_id, parent_kind, created_at, updated_at) "
+                    "VALUES (?, ?, 'rationale', ?, 'closed', 'resolved', "
+                    "        ?, 'node', ?, ?)",
+                    (rationale_id, session_id, rationale_text,
+                     decision_id, now, now),
+                )
+
+            self._touch_session(conn, session_id=session_id, now=now)
+
+            return {
+                "closed_node_ids": closed_node_ids,
+                "decision_id": decision_id if decision_text is not None else None,
+                "rationale_id": rationale_id if rationale_text is not None else None,
+                "derived_from_edge_ids": derived_from_edge_ids,
+            }
+
     def list_edges(
         self,
         *,

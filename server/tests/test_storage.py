@@ -1247,3 +1247,218 @@ def test_resolve_hypothesis_branch_rejects_already_closed_hypothesis(tmp_db_path
     # Confirm no duplicate decision was inserted.
     assert storage.get_node(session_id="ses_1", node_id="d2") is None
     assert storage.get_node(session_id="ses_1", node_id="d3") is None
+
+
+# ---------------------------------------------------------------------------
+# resolve_branch tests
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_branch_all_true_closes_all_resolved(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)  # root_a + h1/h2/h3 all open hypothesis
+
+    result = storage.resolve_branch(
+        session_id="ses_1",
+        parent_id="root_a",
+        parent_kind="root",
+        results=[
+            {"node_id": "h1", "closure_reason": "resolved"},
+            {"node_id": "h2", "closure_reason": "resolved"},
+            {"node_id": "h3", "closure_reason": "resolved"},
+        ],
+        decision_id="d1",
+        decision_text="all three confirmed",
+        rationale_id=None,
+        rationale_text=None,
+        derived_from_node_ids=["h1", "h2", "h3"],
+        now="2026-05-21T11:00:00Z",
+    )
+
+    assert sorted(result["closed_node_ids"]) == ["h1", "h2", "h3"]
+    assert result["decision_id"] == "d1"
+    assert result["rationale_id"] is None
+    assert len(result["derived_from_edge_ids"]) == 3
+
+    for nid in ["h1", "h2", "h3"]:
+        node = storage.get_node(session_id="ses_1", node_id=nid)
+        assert node["status"] == "closed"
+        assert node["closure_reason"] == "resolved"
+
+    d1 = storage.get_node(session_id="ses_1", node_id="d1")
+    assert d1["type"] == "decision"
+    assert d1["parent_id"] == "root_a"
+    assert d1["parent_kind"] == "root"
+
+    edges = storage.list_edges(
+        session_id="ses_1", from_node="d1", edge_type="derived_from",
+    )
+    assert len(edges) == 3
+    assert sorted(e["to_node"] for e in edges) == ["h1", "h2", "h3"]
+
+
+def test_resolve_branch_all_false_closes_all_rejected(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    result = storage.resolve_branch(
+        session_id="ses_1",
+        parent_id="root_a",
+        parent_kind="root",
+        results=[
+            {"node_id": "h1", "closure_reason": "rejected"},
+            {"node_id": "h2", "closure_reason": "rejected"},
+            {"node_id": "h3", "closure_reason": "rejected"},
+        ],
+        decision_id="d1",
+        decision_text="all candidates are dead-ends",
+        rationale_id=None,
+        rationale_text=None,
+        derived_from_node_ids=["h1", "h2", "h3"],
+        now="2026-05-21T11:00:00Z",
+    )
+    for nid in ["h1", "h2", "h3"]:
+        node = storage.get_node(session_id="ses_1", node_id=nid)
+        assert node["closure_reason"] == "rejected"
+    assert len(result["derived_from_edge_ids"]) == 3
+
+
+def test_resolve_branch_mixed_verdicts(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    result = storage.resolve_branch(
+        session_id="ses_1",
+        parent_id="root_a",
+        parent_kind="root",
+        results=[
+            {"node_id": "h1", "closure_reason": "resolved"},
+            {"node_id": "h2", "closure_reason": "rejected"},
+            {"node_id": "h3", "closure_reason": "invalidated"},
+        ],
+        decision_id="d1",
+        decision_text="h1 wins, h2 wrong, h3 invalidated by new constraint",
+        rationale_id=None,
+        rationale_text=None,
+        derived_from_node_ids=None,
+        now="2026-05-21T11:00:00Z",
+    )
+    h1 = storage.get_node(session_id="ses_1", node_id="h1")
+    h2 = storage.get_node(session_id="ses_1", node_id="h2")
+    h3 = storage.get_node(session_id="ses_1", node_id="h3")
+    assert h1["closure_reason"] == "resolved"
+    assert h2["closure_reason"] == "rejected"
+    assert h3["closure_reason"] == "invalidated"
+    assert result["derived_from_edge_ids"] == []
+
+
+def test_resolve_branch_decision_only_no_results(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    result = storage.resolve_branch(
+        session_id="ses_1",
+        parent_id="root_a",
+        parent_kind="root",
+        results=[],
+        decision_id="d1",
+        decision_text="adding a post-hoc summary decision",
+        rationale_id=None,
+        rationale_text=None,
+        derived_from_node_ids=None,
+        now="2026-05-21T11:00:00Z",
+    )
+    assert result["closed_node_ids"] == []
+    assert result["decision_id"] == "d1"
+    d1 = storage.get_node(session_id="ses_1", node_id="d1")
+    assert d1["type"] == "decision"
+
+
+def test_resolve_branch_rejects_empty_results_without_decision(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    with pytest.raises(ValueError, match="requires either results or decision_text"):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="root_a",
+            parent_kind="root",
+            results=[],
+            decision_id=None,
+            decision_text=None,
+            rationale_id=None,
+            rationale_text=None,
+            derived_from_node_ids=None,
+            now="2026-05-21T11:00:00Z",
+        )
+
+
+def test_resolve_branch_rejects_rationale_without_decision(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    with pytest.raises(ValueError, match="rationale_text requires decision_text"):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="root_a",
+            parent_kind="root",
+            results=[{"node_id": "h1", "closure_reason": "resolved"}],
+            decision_id=None,
+            decision_text=None,
+            rationale_id="r1",
+            rationale_text="orphan rationale",
+            derived_from_node_ids=None,
+            now="2026-05-21T11:00:00Z",
+        )
+
+
+def test_resolve_branch_rejects_node_not_direct_child(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+    # Add a grandchild under h1
+    storage.insert_node(
+        node_id="h1a", session_id="ses_1", node_type="evidence",
+        text="grandchild", parent_id="h1", parent_kind="node",
+        now="2026-05-21T10:30:00Z",
+    )
+
+    with pytest.raises(ValueError, match="not a direct child"):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="root_a",
+            parent_kind="root",
+            results=[{"node_id": "h1a", "closure_reason": "resolved"}],
+            decision_id="d1",
+            decision_text="x",
+            rationale_id=None,
+            rationale_text=None,
+            derived_from_node_ids=None,
+            now="2026-05-21T11:00:00Z",
+        )
+
+
+def test_resolve_branch_rolls_back_on_partial_failure(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    with pytest.raises(ValueError):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="root_a",
+            parent_kind="root",
+            results=[
+                {"node_id": "h1", "closure_reason": "resolved"},
+                {"node_id": "nope", "closure_reason": "resolved"},  # missing
+            ],
+            decision_id="d1",
+            decision_text="x",
+            rationale_id=None,
+            rationale_text=None,
+            derived_from_node_ids=None,
+            now="2026-05-21T11:00:00Z",
+        )
+    # h1 must still be open (rollback)
+    h1 = storage.get_node(session_id="ses_1", node_id="h1")
+    assert h1["status"] == "open"
+    # No decision should exist
+    assert storage.get_node(session_id="ses_1", node_id="d1") is None

@@ -325,6 +325,56 @@ def resolve_hypothesis_branch(
         ) from exc
 
 
+def resolve_branch(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+    new_id: Callable[[str], str],
+) -> dict[str, Any]:
+    """Atomically close N sibling nodes with per-node closure_reason and
+    optionally insert decision + rationale + derived_from edges.
+
+    See spec docs/dpd-phase-2.7-draft.md §2 for full contract.
+    """
+    session_id = _required(arguments, "session_id")
+    parent_id = _required(arguments, "parent_id")
+    parent_kind = _required(arguments, "parent_kind")
+    results = arguments.get("results") or []
+    decision_text = arguments.get("decision_text") or None
+    rationale_text = arguments.get("rationale_text") or None
+    derived_from_node_ids = arguments.get("derived_from_node_ids") or None
+
+    for item in results:
+        reason = item.get("closure_reason")
+        if reason not in _VALID_CLOSURE_REASONS:
+            raise ValueError(
+                f"closure_reason must be one of "
+                f"{sorted(_VALID_CLOSURE_REASONS)}, got {reason!r}"
+            )
+
+    decision_id = new_id("node") if decision_text is not None else None
+    rationale_id = new_id("node") if rationale_text is not None else None
+
+    try:
+        return storage.resolve_branch(
+            session_id=session_id,
+            parent_id=parent_id,
+            parent_kind=parent_kind,
+            results=results,
+            decision_id=decision_id,
+            decision_text=decision_text,
+            rationale_id=rationale_id,
+            rationale_text=rationale_text,
+            derived_from_node_ids=derived_from_node_ids,
+            now=now,
+        )
+    except sqlite3.IntegrityError as exc:
+        raise ValueError(
+            f"resolve_branch failed in session {session_id!r}: {exc}"
+        ) from exc
+
+
 _MERMAID_MAX_LABEL = 60
 
 
