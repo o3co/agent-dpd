@@ -1596,3 +1596,51 @@ def test_resolve_branch_rejects_unknown_parent_with_results(tmp_db_path: str) ->
     # h1 must still be open (rollback)
     h1 = storage.get_node(session_id="ses_1", node_id="h1")
     assert h1["status"] == "open"
+
+
+def test_resolve_branch_rejects_decision_text_without_decision_id(tmp_db_path: str) -> None:
+    """decision_text requires decision_id (caller-paired). Codex re-review finding."""
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    with pytest.raises(ValueError, match="decision_id required when decision_text"):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="root_a",
+            parent_kind="root",
+            results=[{"node_id": "h1", "closure_reason": "resolved"}],
+            decision_id=None,
+            decision_text="dangling text",
+            rationale_id=None,
+            rationale_text=None,
+            derived_from_node_ids=None,
+            now="2026-05-21T11:00:00Z",
+        )
+    # h1 must still be open (rollback / no mutation)
+    h1 = storage.get_node(session_id="ses_1", node_id="h1")
+    assert h1["status"] == "open"
+
+
+def test_resolve_branch_rejects_rationale_text_without_rationale_id(tmp_db_path: str) -> None:
+    """rationale_text requires rationale_id (caller-paired). Codex re-review finding."""
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    with pytest.raises(ValueError, match="rationale_id required when rationale_text"):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="root_a",
+            parent_kind="root",
+            results=[{"node_id": "h1", "closure_reason": "resolved"}],
+            decision_id="d1",
+            decision_text="ok decision",
+            rationale_id=None,
+            rationale_text="dangling rationale",
+            derived_from_node_ids=None,
+            now="2026-05-21T11:00:00Z",
+        )
+    # h1 must still be open (rollback / no mutation)
+    h1 = storage.get_node(session_id="ses_1", node_id="h1")
+    assert h1["status"] == "open"
+    # No decision should exist (pre-flight failure)
+    assert storage.get_node(session_id="ses_1", node_id="d1") is None

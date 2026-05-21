@@ -137,6 +137,7 @@ The `resolve_hypothesis_branch` tool encodes the most common closure pattern: ta
 | `add_node(session_id, parent_id, type, text)` | Add child node under root or node → `{node: {...}}` (full row) |
 | `close_node(session_id, node_id, closure_reason)` | Mark resolved/rejected/invalidated |
 | `resolve_hypothesis_branch(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + auto-insert `derived_from` edge (decision → accepted hypothesis) + insert rationale (if any) |
+| `resolve_branch(session_id, parent_id, parent_kind, results, decision_text?, rationale_text?, derived_from_node_ids?)` | Atomically close N sibling nodes with per-node closure_reason, optionally adding decision + rationale + provenance edges. Generic counterpart to `resolve_hypothesis_branch` (which is locked to select-1-of-N) |
 | `set_focus(session_id, node_id?)` | Set/clear `focus_node_id`. Pass `node_id=null` to clear |
 | `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred` |
 | `list_open_nodes(session_id, root_id?)` | Open nodes in session (or within one root's subtree) |

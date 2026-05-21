@@ -518,6 +518,14 @@ class Storage:
             raise ValueError(
                 "resolve_branch requires either results or decision_text"
             )
+        if decision_text is not None and decision_id is None:
+            raise ValueError(
+                "decision_id required when decision_text is provided"
+            )
+        if rationale_text is not None and rationale_id is None:
+            raise ValueError(
+                "rationale_id required when rationale_text is provided"
+            )
 
         with self.connect() as conn:
             # Validate parent_id + parent_kind exist in session.
