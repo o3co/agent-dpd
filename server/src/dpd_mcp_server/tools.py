@@ -267,8 +267,10 @@ def list_edges(
     session_id = _required(arguments, "session_id")
     from_node = arguments.get("from_node") or None
     to_node = arguments.get("to_node") or None
+    edge_type = arguments.get("type") or None
     rows = storage.list_edges(
         session_id=session_id, from_node=from_node, to_node=to_node,
+        edge_type=edge_type,
     )
     return {"edges": [_row_to_dict(r) for r in rows]}
 

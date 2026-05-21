@@ -352,9 +352,10 @@ async def list_tools() -> list[types.Tool]:
             name="list_edges",
             title="List edges",
             description=(
-                "List edges in the session, optionally filtered by from_node "
-                "and/or to_node. When both are given they are AND'd. "
-                "Returns empty list if the session has no matching edges."
+                "List edges in the session, optionally filtered by from_node, "
+                "to_node, and/or type. When multiple filters are given they "
+                "are AND'd. Returns empty list if the session has no matching "
+                "edges."
             ),
             inputSchema={
                 "type": "object",
@@ -363,6 +364,10 @@ async def list_tools() -> list[types.Tool]:
                     "session_id": {"type": "string"},
                     "from_node": {"type": ["string", "null"]},
                     "to_node": {"type": ["string", "null"]},
+                    "type": {
+                        "type": ["string", "null"],
+                        "description": "Filter by edge type (e.g., 'derived_from', 'contradicts').",
+                    },
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",

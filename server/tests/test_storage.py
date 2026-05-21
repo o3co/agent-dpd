@@ -1015,6 +1015,48 @@ def test_list_edges_filters_by_to_node(tmp_db_path: str) -> None:
     assert [r["from_node"] for r in rows] == ["n1", "root_a"]
 
 
+def test_list_edges_filters_by_edge_type(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="derived_from", reason=None, now="2026-05-21T10:00:00Z",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="contradicts", reason=None, now="2026-05-21T10:01:00Z",
+    )
+
+    rows = storage.list_edges(session_id="ses_1", edge_type="derived_from")
+    assert len(rows) == 1
+    assert rows[0]["type"] == "derived_from"
+
+    rows = storage.list_edges(session_id="ses_1", edge_type="contradicts")
+    assert len(rows) == 1
+    assert rows[0]["type"] == "contradicts"
+
+
+def test_list_edges_edge_type_combines_with_endpoint_filters(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="derived_from", reason=None, now="2026-05-21T10:00:00Z",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="n2", to_node="n1",
+        edge_type="derived_from", reason=None, now="2026-05-21T10:01:00Z",
+    )
+
+    rows = storage.list_edges(
+        session_id="ses_1", from_node="n1", edge_type="derived_from",
+    )
+    assert len(rows) == 1
+    assert rows[0]["from_node"] == "n1"
+
+
 def test_list_unblocked_open_nodes_empty_session(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     storage.insert_session(

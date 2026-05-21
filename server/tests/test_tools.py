@@ -629,6 +629,41 @@ def test_add_edge_and_list_edges_tools(storage: Storage) -> None:
     assert list_result["edges"][0]["type"] == "derived_from"
 
 
+def test_list_edges_tool_filters_by_type(storage: Storage) -> None:
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-21T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-21T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="n1", session_id="ses_1", node_type="hypothesis",
+        text="x", parent_id="root_a", parent_kind="root",
+        now="2026-05-21T10:01:00Z",
+    )
+    storage.insert_node(
+        node_id="n2", session_id="ses_1", node_type="evidence",
+        text="y", parent_id="root_a", parent_kind="root",
+        now="2026-05-21T10:01:00Z",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="supports", reason=None, now="2026-05-21T10:02:00Z",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="contradicts", reason=None, now="2026-05-21T10:03:00Z",
+    )
+
+    result = list_edges(
+        storage=storage,
+        arguments={"session_id": "ses_1", "type": "supports"},
+    )
+    assert len(result["edges"]) == 1
+    assert result["edges"][0]["type"] == "supports"
+
+
 def test_resolve_hypothesis_branch_tool_with_rationale(storage: Storage) -> None:
     sid = _start_with_root(storage)
     # Seed 3 hypothesis siblings under root_a

@@ -489,6 +489,7 @@ class Storage:
         session_id: str,
         from_node: str | None = None,
         to_node: str | None = None,
+        edge_type: str | None = None,
     ) -> list[sqlite3.Row]:
         sql = "SELECT * FROM edges WHERE session_id = ?"
         params: list[Any] = [session_id]
@@ -498,6 +499,9 @@ class Storage:
         if to_node is not None:
             sql += " AND to_node = ?"
             params.append(to_node)
+        if edge_type is not None:
+            sql += " AND type = ?"
+            params.append(edge_type)
         sql += " ORDER BY id"
         with self.connect() as conn:
             return list(conn.execute(sql, params))
