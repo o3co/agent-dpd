@@ -1275,11 +1275,29 @@ def test_resolve_branch_all_true_closes_all_resolved(tmp_db_path: str) -> None:
         now="2026-05-21T11:00:00Z",
     )
 
-    assert sorted(result["closed_node_ids"]) == ["h1", "h2", "h3"]
-    assert result["decision_id"] == "d1"
-    assert result["rationale_id"] is None
-    assert len(result["derived_from_edge_ids"]) == 3
+    # closed_nodes: list of full node dicts
+    assert sorted(n["id"] for n in result["closed_nodes"]) == ["h1", "h2", "h3"]
+    for node_dict in result["closed_nodes"]:
+        assert node_dict["status"] == "closed"
+        assert node_dict["closure_reason"] == "resolved"
 
+    # decision_node: full row dict
+    assert result["decision_node"] is not None
+    assert result["decision_node"]["id"] == "d1"
+    assert result["decision_node"]["type"] == "decision"
+    assert result["decision_node"]["parent_id"] == "root_a"
+    assert result["decision_node"]["parent_kind"] == "root"
+
+    # rationale_node: None (not requested)
+    assert result["rationale_node"] is None
+
+    # edges_created: list of full edge dicts
+    assert len(result["edges_created"]) == 3
+    assert all(e["type"] == "derived_from" for e in result["edges_created"])
+    assert all(e["from_node"] == "d1" for e in result["edges_created"])
+    assert sorted(e["to_node"] for e in result["edges_created"]) == ["h1", "h2", "h3"]
+
+    # Verify state in DB
     for nid in ["h1", "h2", "h3"]:
         node = storage.get_node(session_id="ses_1", node_id=nid)
         assert node["status"] == "closed"
@@ -1320,7 +1338,7 @@ def test_resolve_branch_all_false_closes_all_rejected(tmp_db_path: str) -> None:
     for nid in ["h1", "h2", "h3"]:
         node = storage.get_node(session_id="ses_1", node_id=nid)
         assert node["closure_reason"] == "rejected"
-    assert len(result["derived_from_edge_ids"]) == 3
+    assert len(result["edges_created"]) == 3
 
 
 def test_resolve_branch_mixed_verdicts(tmp_db_path: str) -> None:
@@ -1349,7 +1367,7 @@ def test_resolve_branch_mixed_verdicts(tmp_db_path: str) -> None:
     assert h1["closure_reason"] == "resolved"
     assert h2["closure_reason"] == "rejected"
     assert h3["closure_reason"] == "invalidated"
-    assert result["derived_from_edge_ids"] == []
+    assert result["edges_created"] == []
 
 
 def test_resolve_branch_decision_only_no_results(tmp_db_path: str) -> None:
@@ -1368,8 +1386,9 @@ def test_resolve_branch_decision_only_no_results(tmp_db_path: str) -> None:
         derived_from_node_ids=None,
         now="2026-05-21T11:00:00Z",
     )
-    assert result["closed_node_ids"] == []
-    assert result["decision_id"] == "d1"
+    assert result["closed_nodes"] == []
+    assert result["decision_node"] is not None
+    assert result["decision_node"]["id"] == "d1"
     d1 = storage.get_node(session_id="ses_1", node_id="d1")
     assert d1["type"] == "decision"
 
@@ -1462,3 +1481,68 @@ def test_resolve_branch_rolls_back_on_partial_failure(tmp_db_path: str) -> None:
     assert h1["status"] == "open"
     # No decision should exist
     assert storage.get_node(session_id="ses_1", node_id="d1") is None
+
+
+def test_resolve_branch_rejects_derived_from_without_decision(tmp_db_path: str) -> None:
+    """derived_from_node_ids requires decision_text — symmetric with rationale guard."""
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    with pytest.raises(ValueError, match="derived_from_node_ids requires decision_text"):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="root_a",
+            parent_kind="root",
+            results=[{"node_id": "h1", "closure_reason": "resolved"}],
+            decision_id=None,
+            decision_text=None,
+            rationale_id=None,
+            rationale_text=None,
+            derived_from_node_ids=["h1"],
+            now="2026-05-21T11:00:00Z",
+        )
+
+
+def test_resolve_branch_rejects_unknown_derived_from_target(tmp_db_path: str) -> None:
+    """derived_from_node_ids targets must exist in the session (nodes or roots)."""
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    with pytest.raises(ValueError, match="derived_from target"):
+        storage.resolve_branch(
+            session_id="ses_1",
+            parent_id="root_a",
+            parent_kind="root",
+            results=[{"node_id": "h1", "closure_reason": "resolved"}],
+            decision_id="d1",
+            decision_text="adopt h1",
+            rationale_id=None,
+            rationale_text=None,
+            derived_from_node_ids=["h1", "ghost_node"],  # ghost_node does not exist
+            now="2026-05-21T11:00:00Z",
+        )
+    # Transaction must have rolled back: h1 still open, d1 not inserted
+    h1 = storage.get_node(session_id="ses_1", node_id="h1")
+    assert h1["status"] == "open"
+    assert storage.get_node(session_id="ses_1", node_id="d1") is None
+
+
+def test_resolve_branch_derived_from_allows_root_as_target(tmp_db_path: str) -> None:
+    """A root_id is a valid derived_from target (nodes OR roots lookup)."""
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    result = storage.resolve_branch(
+        session_id="ses_1",
+        parent_id="root_a",
+        parent_kind="root",
+        results=[{"node_id": "h1", "closure_reason": "resolved"}],
+        decision_id="d1",
+        decision_text="derived from root",
+        rationale_id=None,
+        rationale_text=None,
+        derived_from_node_ids=["root_a"],  # root is a valid target
+        now="2026-05-21T11:00:00Z",
+    )
+    assert len(result["edges_created"]) == 1
+    assert result["edges_created"][0]["to_node"] == "root_a"

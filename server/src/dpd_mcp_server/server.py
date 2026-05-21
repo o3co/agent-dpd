@@ -478,7 +478,10 @@ async def list_tools() -> list[types.Tool]:
                             "required": ["node_id", "closure_reason"],
                             "properties": {
                                 "node_id": {"type": "string"},
-                                "closure_reason": {"type": "string"},
+                                "closure_reason": {
+                                    "type": "string",
+                                    "enum": ["resolved", "rejected", "invalidated"],
+                                },
                             },
                         },
                     },

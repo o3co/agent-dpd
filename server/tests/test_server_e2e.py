@@ -310,14 +310,15 @@ def test_resolve_branch_through_stdio(tmp_path: Path) -> None:
             "decision_text": "all confirmed",
             "derived_from_node_ids": hyp_ids,
         })
-        assert sorted(result["closed_node_ids"]) == sorted(hyp_ids)
-        assert result["decision_id"].startswith("node_")
-        assert result["rationale_id"] is None
-        assert len(result["derived_from_edge_ids"]) == 3
+        assert sorted(n["id"] for n in result["closed_nodes"]) == sorted(hyp_ids)
+        assert result["decision_node"] is not None
+        assert result["decision_node"]["id"].startswith("node_")
+        assert result["rationale_node"] is None
+        assert len(result["edges_created"]) == 3
 
         edges = call_tool(8, "list_edges", {
             "session_id": session_id,
-            "from_node": result["decision_id"],
+            "from_node": result["decision_node"]["id"],
             "type": "derived_from",
         })
         assert len(edges["edges"]) == 3

@@ -510,13 +510,17 @@ class Storage:
             raise ValueError(
                 "rationale_text requires decision_text to be set"
             )
+        if decision_text is None and derived_from_node_ids:
+            raise ValueError(
+                "derived_from_node_ids requires decision_text to be set"
+            )
         if not results and decision_text is None:
             raise ValueError(
                 "resolve_branch requires either results or decision_text"
             )
 
         with self.connect() as conn:
-            closed_node_ids: list[str] = []
+            closed_nodes: list[dict] = []
             for item in results:
                 node_id = item["node_id"]
                 closure_reason = item["closure_reason"]
@@ -543,7 +547,6 @@ class Storage:
                     "updated_at = ? WHERE session_id = ? AND id = ?",
                     (closure_reason, now, session_id, node_id),
                 )
-                closed_node_ids.append(node_id)
 
             if decision_text is not None and decision_id is not None:
                 conn.execute(
@@ -555,16 +558,30 @@ class Storage:
                      parent_id, parent_kind, now, now),
                 )
 
-            derived_from_edge_ids: list[int] = []
+            edges_created: list[dict] = []
             if derived_from_node_ids and decision_id is not None:
                 for target in derived_from_node_ids:
+                    exists = conn.execute(
+                        "SELECT 1 FROM nodes WHERE session_id = ? AND id = ? "
+                        "UNION ALL "
+                        "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                        (session_id, target, session_id, target),
+                    ).fetchone()
+                    if exists is None:
+                        raise ValueError(
+                            f"derived_from target {target!r} not found "
+                            f"in session {session_id!r}"
+                        )
                     cur = conn.execute(
                         "INSERT INTO edges "
                         "(session_id, from_node, to_node, type, reason, created_at) "
                         "VALUES (?, ?, ?, 'derived_from', NULL, ?)",
                         (session_id, decision_id, target, now),
                     )
-                    derived_from_edge_ids.append(cur.lastrowid)
+                    edge_row = conn.execute(
+                        "SELECT * FROM edges WHERE id = ?", (cur.lastrowid,)
+                    ).fetchone()
+                    edges_created.append({k: edge_row[k] for k in edge_row.keys()})
 
             if (
                 rationale_id is not None
@@ -583,11 +600,39 @@ class Storage:
 
             self._touch_session(conn, session_id=session_id, now=now)
 
+            # Re-fetch closed node rows after UPDATE so we return post-close state.
+            for item in results:
+                node_row = conn.execute(
+                    "SELECT * FROM nodes WHERE session_id = ? AND id = ?",
+                    (session_id, item["node_id"]),
+                ).fetchone()
+                closed_nodes.append({k: node_row[k] for k in node_row.keys()})
+
+            decision_node: dict | None = None
+            if decision_text is not None and decision_id is not None:
+                d_row = conn.execute(
+                    "SELECT * FROM nodes WHERE session_id = ? AND id = ?",
+                    (session_id, decision_id),
+                ).fetchone()
+                decision_node = {k: d_row[k] for k in d_row.keys()}
+
+            rationale_node: dict | None = None
+            if (
+                rationale_id is not None
+                and rationale_text is not None
+                and decision_id is not None
+            ):
+                r_row = conn.execute(
+                    "SELECT * FROM nodes WHERE session_id = ? AND id = ?",
+                    (session_id, rationale_id),
+                ).fetchone()
+                rationale_node = {k: r_row[k] for k in r_row.keys()}
+
             return {
-                "closed_node_ids": closed_node_ids,
-                "decision_id": decision_id if decision_text is not None else None,
-                "rationale_id": rationale_id if rationale_text is not None else None,
-                "derived_from_edge_ids": derived_from_edge_ids,
+                "closed_nodes": closed_nodes,
+                "decision_node": decision_node,
+                "rationale_node": rationale_node,
+                "edges_created": edges_created,
             }
 
     def list_edges(

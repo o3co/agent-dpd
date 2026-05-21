@@ -996,10 +996,11 @@ def test_resolve_branch_tool_all_true(storage: Storage) -> None:
         new_id=fake_new_id,
     )
 
-    assert sorted(result["closed_node_ids"]) == ["h1", "h2"]
-    assert result["decision_id"] is not None
-    assert result["rationale_id"] is None
-    assert len(result["derived_from_edge_ids"]) == 2
+    assert sorted(n["id"] for n in result["closed_nodes"]) == ["h1", "h2"]
+    assert result["decision_node"] is not None
+    assert result["decision_node"]["id"] is not None
+    assert result["rationale_node"] is None
+    assert len(result["edges_created"]) == 2
 
 
 def test_resolve_branch_tool_validates_closure_reason(storage: Storage) -> None:
