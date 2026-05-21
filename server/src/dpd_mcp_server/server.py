@@ -18,6 +18,7 @@ from . import tools
 from .ids import new_id
 from .scope import AgentScopeResolutionError, resolve_agent_scope
 from .storage import Storage
+from .tool_aliases import LEGACY_ALIASES
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,7 +78,7 @@ async def _get_storage(arguments: dict) -> Storage:
 
 @app.list_tools()
 async def list_tools() -> list[types.Tool]:
-    return [
+    tools = [
         types.Tool(
             name="start_session",
             title="Start session",
@@ -527,10 +528,28 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
     ]
+    by_name = {t.name: t for t in tools}
+    for old, new in LEGACY_ALIASES.items():
+        new_tool = by_name.get(new)
+        if new_tool is None:
+            continue  # safeguard: alias target doesn't exist
+        tools.append(types.Tool(
+            name=old,
+            title=new_tool.title,
+            description=f"[DEPRECATED: use '{new}' instead] {new_tool.description}",
+            inputSchema=new_tool.inputSchema,
+        ))
+    return tools
 
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    if name in LEGACY_ALIASES:
+        new_name = LEGACY_ALIASES[name]
+        log.warning(
+            "Tool %r is deprecated, use %r instead", name, new_name
+        )
+        name = new_name
     storage = await _get_storage(arguments)
     now = _now_iso()
     # Strip the routing-only control argument before passing to tool functions.
