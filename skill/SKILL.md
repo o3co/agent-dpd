@@ -149,6 +149,84 @@ The `resolve_hypothesis_branch` tool encodes the most common closure pattern: ta
 | `walk_subtree(session_id, root_id)` | All descendants of root (pre-order) |
 | `list_active_roots(session_id)` | Roots with lifecycle=active |
 
+## Edge type vocabulary
+
+Documented edge types and their direction conventions:
+
+| Type | Direction (from → to) | Use |
+| --- | --- | --- |
+| `derived_from` | derived → source | Decision/evidence is derived from earlier node (e.g., `decision → hypothesis`, `new_finding → origin_decision`) |
+| `supports` | supporter → supported | Evidence supports a decision/hypothesis |
+| `contradicts` | contradictor → contradicted | Observation contradicts a decision/hypothesis |
+| `qualifies` | qualifier → qualified | Finding limits or scopes a target decision without overturning it |
+| `invalidates` | invalidator → invalidated | Finding shows a target decision's premise no longer holds |
+| `blocks` | blocker → blocked | Dependency: blocker must close before blocked can be addressed |
+
+**Direction rule**: from-side is the "active" side (supporting, contradicting, qualifying, deriving); to-side is the target. This matches `storage.py:457-463` for `derived_from` (`from=decision, to=hypothesis`).
+
+## Cross-TBD post-hoc evidence (canonical form)
+
+When working under one root reveals a finding that strengthens, qualifies, or undermines a decision already made in a different root, record the finding using this canonical form.
+
+**Step 1 — Decide node-or-edge-only**
+
+Ask: "Could this finding later be refined, extended, or objected to?"
+
+- **YES** → make a node (Step 2 onward)
+- **NO** → 1 edge only: `add_edge(from=origin_decision, to=target_decision, type=qualifies|invalidates|supports|contradicts)`. Done.
+
+**Step 2 — Add the evidence node under the target root**
+
+```text
+add_node(
+  session_id,
+  parent_id = <target_root_id>,           # target root (physical proximity)
+  type      = "evidence",                 # or "rationale" when appropriate
+  text      = "<finding> (Discovered in <origin_root> during <origin_node>)"
+)
+→ new_node_id
+```
+
+**Step 3 — Valence edge to the target decision**
+
+```text
+add_edge(
+  session_id,
+  from = new_node_id,
+  to   = <target_decision_id>,
+  type = qualifies | invalidates | supports | contradicts,
+  reason = "<short label>"
+)
+```
+
+**Step 4 — Provenance edge from new node to the origin decision**
+
+```text
+add_edge(
+  session_id,
+  from = new_node_id,                     # the derived finding
+  to   = <origin_decision_id>,            # the source it was derived from
+  type = "derived_from",
+  reason = "post-hoc finding from <origin_root>"
+)
+```
+
+To later trace where a finding came from:
+
+```text
+list_edges(session_id, from_node=<new_node_id>, type="derived_from")
+```
+
+## Searching dissenting evidence
+
+To find all contradicting findings in the session:
+
+```text
+list_edges(session_id, type="contradicts")
+```
+
+Combine with `to_node=<decision_id>` to find dissent against a specific decision.
+
 ## Tone
 
 Graph mode is a structural overlay on the conversation. Keep responses tight: after each tool call, give the user a one-line `<verb> <node-id>: <short text>` rather than narrating. The structure is the value, not the prose.
