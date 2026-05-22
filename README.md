@@ -116,23 +116,14 @@ The basic per-session rhythm: **set the anchor → observe the conversation → 
 /dpd --scope=<scope-name>
 ```
 
-### Example: self-validating a spec
+### Detailed examples
 
-The `/dpd-import → /dpd-fill → /fcot` pipeline gives you systematic gap analysis on any design document:
+Walked-through use cases — actual graphs built with the real MCP tools, transcripts and Mermaid included — live in [`docs/examples.md`](docs/examples.md):
 
-```text
-/dpd-import path/to/your-spec.md
-    # imports the spec as an archived subgraph
-
-/dpd-fill
-    # generates inferred nodes — missing decompositions, unstated assumptions
-
-/fcot
-    # falsifies each inferred node against the spec text
-    # → real gaps survive, plausible-but-already-covered ones get filtered out
-```
-
-This is how we validated DPD's own spec before release — see [docs/concept.md#built-agent-driven-with-dpd](docs/concept.md#built-agent-driven-with-dpd) for the story and what we found.
+1. **Decide a monetization model** — multiple hypotheses → evidence → decision with the rejected alternatives preserved.
+2. **Narrow a vague service idea into a minimum spec** — End-narrowing pressure forces "I want to build an app" down to a concrete first-version spec with explicit non-goals.
+3. **Validate a spec for consistency and completeness** — the `/dpd-import → /dpd-fill → /fcot` pipeline; the same one used on DPD's own spec before release.
+4. **Multi-agent dev workflow across sessions** — using the session as a handoff surface when implementation takes more context than a single agent has.
 
 ### Good fits
 

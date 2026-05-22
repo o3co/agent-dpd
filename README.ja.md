@@ -116,25 +116,14 @@ DPD: [mark_reached] セッションは idle に。サブグラフを閉じまし
 /dpd --scope=<scope名>
 ```
 
-### 使用例
+### 詳細な使用例
 
-#### 仕様の self-validation (自己検証)
+実際に MCP ツールで graph を組んだ walkthrough (transcript + Mermaid 込み) を [`docs/examples.md`](docs/examples.md) (英語のみ) に集約しています。「こんな時に使います」の各ケースに対応:
 
-`/dpd-import → /dpd-fill → /fcot` のパイプラインで、任意の設計文書に対して体系的なギャップ分析が行えます:
-
-```text
-/dpd-import path/to/your-spec.md
-    # 仕様をアーカイブ済みサブグラフとして取り込み
-
-/dpd-fill
-    # 推論ノード生成 — 欠けた分解、未明示の前提
-
-/fcot
-    # 各推論ノードを仕様文書に対して反証
-    # → 実際のギャップが残り、もっともらしいだけのものは除外される
-```
-
-これは DPD 自身の仕様をリリース前に検証した手法です。詳細と発見したギャップについては [docs/concept.ja.md#dpd-で-agent-driven-に作られた](docs/concept.ja.md#dpd-で-agent-driven-に作られた) を参照。
+1. **マネタイズモデルを落とし込む** — 複数仮説 → evidence → 採用 + 却下案も根拠付きで保存
+2. **もやっとしたサービスを最小スペックに narrowing** — End 絞り込みで「アプリ作りたい」を具体的な初版 spec (target / interaction / non-goals) まで落とす
+3. **仕様の妥当性 / 整合性チェック** — `/dpd-import → /dpd-fill → /fcot` パイプライン。DPD 自身の spec もこれでリリース前検証した
+4. **セッションを跨ぐ multi-agent 開発** — 1 つのエージェントの context に収まらない実装を、session を handoff surface として複数 agent でリレーする
 
 ### 向いている場面
 
