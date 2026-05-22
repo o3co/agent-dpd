@@ -53,7 +53,7 @@ mkdir -p ~/.claude/skills/dpd
 cp -r SKILL.md README.md dpd-* ~/.claude/skills/dpd/
 ```
 
-リポジトリのルートから `make install` で MCP server を入れた場合、Makefile に `skill-install` target を追加することもできる (TODO、未提供 — 今は上記の手動 `cp` が documented path)。
+install.sh は現状スキルファイルの同期を行いません。`--with-skill` フラグの追加を計画中 (TODO)。今は上記の手動 `cp` が公式手順です。
 
 install 後は Claude Code を再起動。`/dpd` / `/dpd-status` / `/dpd-dump` 等の invocation が利用可能になるはず。
 

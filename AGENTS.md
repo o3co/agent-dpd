@@ -16,6 +16,10 @@ The MCP server is stateless w.r.t. conversation; the skill is stateless w.r.t. g
 
 Requires Python 3.11+.
 
+The simplest path is `./install.sh` from the repo root (or `make install`, which wraps it). It creates the venv, installs the package in editable mode with dev deps, and registers the server with Claude Code. Env overrides (`DPD_INSTALL_DIR`, `DPD_PYTHON`, `DPD_NO_REGISTER`) are documented in [install.sh](install.sh).
+
+If you need to know what install.sh actually does (e.g., to debug or customize):
+
 ```bash
 # from repo root
 python3.11 -m venv mcp/.venv

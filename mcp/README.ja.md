@@ -43,8 +43,7 @@ Storage path: ~/.claude/dpd-server/data/<encoded-agent-scope>/graph.sqlite
 リポジトリのルートから:
 
 ```bash
-make install        # mcp/.venv を作って editable + dev deps を install
-make register       # dpd-mcp-server を Claude Code に登録
+./install.sh        # venv 作成 + editable install + Claude Code への MCP 登録
 ```
 
 手動でやる場合:
@@ -54,6 +53,8 @@ python3.11 -m venv mcp/.venv
 mcp/.venv/bin/pip install -e 'mcp[dev]'
 claude mcp add dpd-mcp-server -- "$(pwd)/mcp/.venv/bin/dpd-mcp-server"
 ```
+
+リポジトリのクローンも含めた one-liner はトップレベルの [README.ja.md](../README.ja.md#インストール) を参照。
 
 `mcp__dpd-mcp-server__*` tool を discover させるため Claude Code を再起動。
 

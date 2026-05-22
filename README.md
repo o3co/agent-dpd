@@ -1,8 +1,12 @@
-# DPD — Decompose-Propagate Decision
+# DPD — Decompose-Propagate Decision - A method for organizing thoughts with AI
 
 [日本語](README.ja.md)
 
-A Claude Code skill + MCP server that turns long branching AI conversations into an explicit decision graph. Decisions get recorded with their evidence, rejected hypotheses don't get lost, and "what did we decide about X" stops being a transcript-search problem.
+Ever had a sudden insight, or pivoted what you're aiming for mid-AI-conversation, only to find the AI lost the thread?
+
+DPD turns the dialogue into a graph and organizes the thinking process toward your goal. From there, the AI itself helps you surface goal changes, missing considerations, and contradictions with what was said earlier.
+
+Implementation: a Claude Code skill + MCP server.
 
 > **Status**: `0.x` — pre-1.0, public surface may still change. See [docs/concept.md](docs/concept.md#status-and-versioning) for details.
 
@@ -10,15 +14,31 @@ A Claude Code skill + MCP server that turns long branching AI conversations into
 
 ## Install
 
-Requires Python 3.11+, [Claude Code](https://docs.anthropic.com/en/docs/claude-code), and `make`.
+Requires Python 3.11+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/o3co/agent-dpd/main/install.sh | bash
+```
+
+That single command clones the repo (to `~/agent-dpd` by default), creates a venv, installs the package, and registers `dpd-mcp-server` with Claude Code. Restart Claude Code afterwards so the `/dpd` skill becomes discoverable.
+
+If you'd rather review the script first:
 
 ```bash
 git clone https://github.com/o3co/agent-dpd.git
 cd agent-dpd
-make dev          # creates venv + installs + registers with Claude Code
+./install.sh
 ```
 
-Restart Claude Code so the `/dpd` skill becomes available. Manual install steps (no Make) are in [AGENTS.md](AGENTS.md#setup).
+### Environment overrides
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DPD_INSTALL_DIR` | `$HOME/agent-dpd` | Where to clone the repo |
+| `DPD_PYTHON` | `python3.11` | Python interpreter to use |
+| `DPD_NO_REGISTER` | unset | Set to skip Claude Code registration |
+
+Manual steps (no install.sh) are in [AGENTS.md](AGENTS.md#setup).
 
 ---
 
@@ -61,6 +81,16 @@ DPD: [mark_reached] Session is idle. Subgraph closed.
 
 You type prose. DPD does the bookkeeping (proposing, recording, narrowing) and asks for confirmation at natural pauses. Nothing changes in the graph without your explicit OK.
 
+### What was happening here
+
+Mapped to DPD's terms, the walkthrough was three phases:
+
+1. **Entry phase** — right after `/dpd` fires, the goal (Start) and achievement conditions (End) get pinned down as anchors. Everything that follows can now be measured for drift against this anchor.
+2. **Ambient mode** — normal conversation continues; DPD observes and, at natural pauses, says "here's what I'd record". Hypothesis adds, closures, and decisions all require your explicit OK.
+3. **mark_reached** — when the End condition is satisfied, the subgraph is closed and frozen in a "what was decided, and why" state you can revisit later.
+
+The basic per-session rhythm: **set the anchor → observe the conversation → propose tidy-up at natural pauses → freeze when done**.
+
 ---
 
 ## What you can do
@@ -76,6 +106,15 @@ You type prose. DPD does the bookkeeping (proposing, recording, narrowing) and a
 | `/dpd-edit <id>` | Manual edit when you want direct control |
 | `/dpd-import <file>` | Import a prose/spec/graph doc as an archived subgraph |
 | `/dpd-fill` | Generate inferred gap candidates against the current graph |
+
+#### Run / resume with a scope
+
+```text
+# Pass any name to set the sub-scope explicitly.
+# Without --scope: runs as top-level (uses `.dpdrc` walk-up if found, else no scope).
+# With a `.dpdrc` in place: any /dpd invoked under that directory auto-attaches to its scope.
+/dpd --scope=<scope-name>
+```
 
 ### Example: self-validating a spec
 
@@ -123,9 +162,14 @@ The server walks up from your editor's cwd to find this marker and uses its loca
 
 ---
 
-## Learn more
+## About DPD's methodology
+
+Why represent decisions as a *graph*, what failure modes the End modification gate / Pool / rejected-hypothesis-retention mechanisms prevent, and how DPD itself was developed via DPD's own self-validation pipeline — the rationale behind these design choices lives in [docs/concept.md](docs/concept.md).
 
 - **[docs/concept.md](docs/concept.md)** — What DPD is, why it exists, how the graph works, lifecycle states, the agent-driven dogfood story
+
+## Other docs
+
 - **[mcp/README.md](mcp/README.md)** — MCP server architecture + 30-tool reference
 - **[skill/README.md](skill/README.md)** — Skill family overview (main `/dpd` + sub-skills)
 - **[AGENTS.md](AGENTS.md)** — Contributor guidelines (TDD, review workflow, conventions)

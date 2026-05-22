@@ -43,8 +43,7 @@ Schema migrations run automatically when an older DB is opened: the current sche
 From the repository root:
 
 ```bash
-make install        # creates mcp/.venv, installs editable + dev deps
-make register       # registers dpd-mcp-server with Claude Code
+./install.sh        # venv + editable install + Claude Code MCP register
 ```
 
 Or manually:
@@ -54,6 +53,8 @@ python3.11 -m venv mcp/.venv
 mcp/.venv/bin/pip install -e 'mcp[dev]'
 claude mcp add dpd-mcp-server -- "$(pwd)/mcp/.venv/bin/dpd-mcp-server"
 ```
+
+For the one-liner that also clones the repo, see the top-level [README.md](../README.md#install).
 
 Restart Claude Code so the `mcp__dpd-mcp-server__*` tools are discoverable.
 
