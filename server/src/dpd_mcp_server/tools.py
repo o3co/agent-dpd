@@ -192,7 +192,8 @@ def list_sessions(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     scope = arguments.get("scope") or None
-    rows = storage.list_sessions(scope=scope)
+    mode_filter = arguments.get("mode_filter") or None
+    rows = storage.list_sessions(scope=scope, mode_filter=mode_filter)
     return {"sessions": [_row_to_dict(r) for r in rows]}
 
 

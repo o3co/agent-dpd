@@ -2277,3 +2277,64 @@ def test_bulk_import_unknown_root_raises(tmp_db_path: str) -> None:
             arguments={"session_id": sid, "root_id": "ghost_root", "nodes": nodes, "edges": []},
             now="2026-05-22T10:01:00Z",
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 8 (v0.3.1): list_sessions mode_filter arg
+# ---------------------------------------------------------------------------
+
+
+def _seed_mode_sessions(storage: Storage) -> None:
+    """Insert sessions with entry, ambient, idle modes for mode_filter tests."""
+    storage.insert_session(session_id="ses_entry", scope=None, label="e",
+                           mode="entry", now="2026-05-22T10:00:00Z")
+    storage.insert_session(session_id="ses_ambient", scope=None, label="a",
+                           mode="ambient", now="2026-05-22T10:01:00Z")
+    storage.insert_session(session_id="ses_idle", scope=None, label="i",
+                           mode="idle", now="2026-05-22T10:02:00Z")
+
+
+def test_list_sessions_no_filter_returns_all(tmp_db_path: str) -> None:
+    """Without mode_filter, all sessions are returned (existing behavior)."""
+    storage = Storage.open(tmp_db_path)
+    _seed_mode_sessions(storage)
+
+    result = list_sessions(storage=storage, arguments={})
+    ids = {s["id"] for s in result["sessions"]}
+    assert ids == {"ses_entry", "ses_ambient", "ses_idle"}
+
+
+def test_list_sessions_single_mode_filter(tmp_db_path: str) -> None:
+    """mode_filter='ambient' returns only ambient sessions."""
+    storage = Storage.open(tmp_db_path)
+    _seed_mode_sessions(storage)
+
+    result = list_sessions(storage=storage, arguments={"mode_filter": "ambient"})
+    ids = [s["id"] for s in result["sessions"]]
+    assert ids == ["ses_ambient"]
+
+
+def test_list_sessions_list_mode_filter(tmp_db_path: str) -> None:
+    """mode_filter=['entry', 'ambient'] returns sessions with either mode."""
+    storage = Storage.open(tmp_db_path)
+    _seed_mode_sessions(storage)
+
+    result = list_sessions(storage=storage, arguments={"mode_filter": ["entry", "ambient"]})
+    ids = {s["id"] for s in result["sessions"]}
+    assert ids == {"ses_entry", "ses_ambient"}
+
+
+def test_list_sessions_invalid_mode_raises(tmp_db_path: str) -> None:
+    """mode_filter='bogus' raises ValueError."""
+    storage = Storage.open(tmp_db_path)
+
+    with pytest.raises(ValueError, match="bogus|invalid"):
+        list_sessions(storage=storage, arguments={"mode_filter": "bogus"})
+
+
+def test_list_sessions_invalid_list_member_raises(tmp_db_path: str) -> None:
+    """mode_filter=['entry', 'bogus'] raises ValueError."""
+    storage = Storage.open(tmp_db_path)
+
+    with pytest.raises(ValueError, match="bogus|invalid"):
+        list_sessions(storage=storage, arguments={"mode_filter": ["entry", "bogus"]})

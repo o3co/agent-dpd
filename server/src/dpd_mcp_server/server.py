@@ -255,7 +255,8 @@ async def list_tools() -> list[types.Tool]:
                 "List sessions for the given sub-scope, most-recently-updated first. "
                 "Omit (or pass empty/null) ``scope`` to list top-level sessions only "
                 "(rows with NULL scope). Used by the skill startup flow to offer "
-                "resume vs new-session UX."
+                "resume vs new-session UX. "
+                "Optionally filter by session mode via ``mode_filter``."
             ),
             inputSchema={
                 "type": "object",
@@ -263,6 +264,17 @@ async def list_tools() -> list[types.Tool]:
                     "scope": {
                         "type": ["string", "null"],
                         "description": "Sub-scope to filter by. Omit or pass null/empty for top-level sessions only.",
+                    },
+                    "mode_filter": {
+                        "oneOf": [
+                            {"type": "string", "enum": ["entry", "ambient", "idle"]},
+                            {
+                                "type": "array",
+                                "items": {"type": "string", "enum": ["entry", "ambient", "idle"]},
+                            },
+                            {"type": "null"},
+                        ],
+                        "description": "Filter sessions by mode. Single string or list of strings (entry/ambient/idle). Omit or pass null to return all sessions regardless of mode.",
                     },
                     "agent_scope": {
                         "type": ["string", "null"],

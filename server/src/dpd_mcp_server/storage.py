@@ -209,26 +209,59 @@ class Storage:
                 "SELECT * FROM sessions WHERE id = ?", (session_id,)
             ).fetchone()
 
-    def list_sessions(self, *, scope: str | None) -> list[sqlite3.Row]:
+    _VALID_SESSION_MODES = frozenset({"entry", "ambient", "idle"})
+
+    def list_sessions(
+        self,
+        *,
+        scope: str | None,
+        mode_filter: str | list[str] | None = None,
+    ) -> list[sqlite3.Row]:
         """Return sessions for the given sub-scope, most-recently-updated first.
 
         ``scope=None`` matches only top-level sessions (rows with NULL scope),
         not "all sessions" — sub-scope and top-level are kept distinct so the
         skill startup flow (§8.3 step 3) can list exactly the candidates for
         the cwd-resolved scope.
+
+        ``mode_filter`` optionally restricts results to sessions whose ``mode``
+        column is in the given set. Accepts a single string or a list of strings.
+        Valid values: ``entry``, ``ambient``, ``idle``. Raises ``ValueError``
+        for any unrecognised value. When ``None`` (default), no mode filter is
+        applied — preserving backward-compatible behavior.
         """
-        with self.connect() as conn:
-            if scope is None:
-                cursor = conn.execute(
-                    "SELECT * FROM sessions WHERE scope IS NULL "
-                    "ORDER BY updated_at DESC, id"
-                )
+        # Validate and normalise mode_filter.
+        modes: list[str] | None = None
+        if mode_filter is not None:
+            if isinstance(mode_filter, str):
+                candidates = [mode_filter]
             else:
-                cursor = conn.execute(
-                    "SELECT * FROM sessions WHERE scope = ? "
-                    "ORDER BY updated_at DESC, id",
-                    (scope,),
-                )
+                candidates = list(mode_filter)
+            for m in candidates:
+                if m not in self._VALID_SESSION_MODES:
+                    raise ValueError(
+                        f"invalid mode_filter value: {m!r}. "
+                        f"Must be one of {sorted(self._VALID_SESSION_MODES)}."
+                    )
+            modes = candidates
+
+        with self.connect() as conn:
+            sql = "SELECT * FROM sessions WHERE "
+            params: list[Any] = []
+
+            if scope is None:
+                sql += "scope IS NULL"
+            else:
+                sql += "scope = ?"
+                params.append(scope)
+
+            if modes is not None:
+                placeholders = ",".join("?" * len(modes))
+                sql += f" AND mode IN ({placeholders})"
+                params.extend(modes)
+
+            sql += " ORDER BY updated_at DESC, id"
+            cursor = conn.execute(sql, params)
             return list(cursor)
 
     @staticmethod
