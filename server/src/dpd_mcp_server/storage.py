@@ -316,6 +316,8 @@ class Storage:
         text: str,
         parent_id: str,
         now: str,
+        provenance: str = "grounded",
+        state: str = "active",
     ) -> str:
         """Insert a node, atomically classifying its parent kind.
 
@@ -324,6 +326,8 @@ class Storage:
 
         Classify-and-insert run in a single transaction so a concurrent
         delete between the lookup and the insert cannot create an orphan.
+        provenance and state are validated by DB CHECK constraints; invalid
+        values cause sqlite3.IntegrityError which propagates to the caller.
         """
         with self.connect() as conn:
             if conn.execute(
@@ -345,11 +349,11 @@ class Storage:
                 """
                 INSERT INTO nodes
                     (id, session_id, type, text, status, closure_reason,
-                     parent_id, parent_kind, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?)
+                     parent_id, parent_kind, provenance, state, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?, ?, ?)
                 """,
                 (node_id, session_id, node_type, text,
-                 parent_id, parent_kind, now, now),
+                 parent_id, parent_kind, provenance, state, now, now),
             )
             self._touch_session(conn, session_id=session_id, now=now)
             return parent_kind
@@ -1133,8 +1137,10 @@ class Storage:
         paired_for: str | None,
         achievement_conditions: str | None,
         now: str,
+        provenance: str = "grounded",
+        state: str = "active",
     ) -> None:
-        """v3 node insert: supports paired_for + achievement_conditions + state=active.
+        """v3 node insert: supports paired_for + achievement_conditions + provenance + state.
 
         End nodes must specify paired_for (= the Start node they terminate).
 
@@ -1144,6 +1150,8 @@ class Storage:
         the same transaction — callers must not pass it.
 
         Raises ValueError if parent_id is not found in either roots or nodes.
+        provenance and state are validated by DB CHECK constraints; invalid
+        values cause sqlite3.IntegrityError which propagates to the caller.
         """
         if node_type == "end" and not paired_for:
             raise ValueError("End nodes require paired_for (= paired Start id)")
@@ -1168,15 +1176,16 @@ class Storage:
                     (id, session_id, type, text, status, closure_reason,
                      parent_id, parent_kind,
                      paired_for, achievement_conditions,
-                     achievement_conditions_satisfied, state,
+                     achievement_conditions_satisfied, state, provenance,
                      archived_at, closed_at, deletable_at,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?, 0, 'active',
+                VALUES (?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?, 0, ?, ?,
                         NULL, NULL, NULL, ?, ?)
                 """,
                 (node_id, session_id, node_type, text,
                  parent_id, parent_kind,
                  paired_for, achievement_conditions,
+                 state, provenance,
                  now, now),
             )
             self._touch_session(conn, session_id=session_id, now=now)

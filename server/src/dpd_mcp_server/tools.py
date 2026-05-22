@@ -70,6 +70,8 @@ def add_node(
     text = _required(arguments, "text")
     paired_for = arguments.get("paired_for") or None
     achievement_conditions = arguments.get("achievement_conditions") or None
+    provenance = arguments.get("provenance") or "grounded"
+    state = arguments.get("state") or "active"
 
     nid = new_id("node")
 
@@ -85,6 +87,8 @@ def add_node(
                 paired_for=paired_for,
                 achievement_conditions=achievement_conditions,
                 now=now,
+                provenance=provenance,
+                state=state,
             )
         except sqlite3.IntegrityError as exc:
             raise ValueError(
@@ -99,6 +103,8 @@ def add_node(
                 text=text,
                 parent_id=parent_id,
                 now=now,
+                provenance=provenance,
+                state=state,
             )
         except sqlite3.IntegrityError as exc:
             raise ValueError(

@@ -1264,6 +1264,118 @@ def test_pool_list_rejected_only_excludes_elevated(tmp_db_path):
 
 
 # ---------------------------------------------------------------------------
+# Task 4: add_node provenance + state args
+# ---------------------------------------------------------------------------
+
+
+def test_add_node_default_provenance_grounded(tmp_db_path):
+    """When provenance arg is omitted, node has provenance='grounded'."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    result = add_node(
+        storage=storage,
+        arguments={"session_id": "ses_1", "parent_id": "r1",
+                   "type": "question", "text": "Q?"},
+        now="2026-05-22T00:00:00Z",
+        new_id=lambda p: "n1",
+    )
+    assert result["node"]["provenance"] == "grounded"
+
+
+def test_add_node_inferred_provenance(tmp_db_path):
+    """add_node(provenance='inferred') creates a node with provenance='inferred'."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    result = add_node(
+        storage=storage,
+        arguments={"session_id": "ses_1", "parent_id": "r1",
+                   "type": "hypothesis", "text": "H",
+                   "provenance": "inferred"},
+        now="2026-05-22T00:00:00Z",
+        new_id=lambda p: "n1",
+    )
+    assert result["node"]["provenance"] == "inferred"
+
+
+def test_add_node_imported_with_archived_state(tmp_db_path):
+    """add_node(provenance='imported', state='archived') creates the right combo."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    result = add_node(
+        storage=storage,
+        arguments={"session_id": "ses_1", "parent_id": "r1",
+                   "type": "evidence", "text": "E",
+                   "provenance": "imported", "state": "archived"},
+        now="2026-05-22T00:00:00Z",
+        new_id=lambda p: "n1",
+    )
+    assert result["node"]["provenance"] == "imported"
+    assert result["node"]["state"] == "archived"
+
+
+def test_add_node_invalid_provenance_raises(tmp_db_path):
+    """add_node(provenance='bogus') raises ValueError (DB CHECK enforces)."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    with pytest.raises(ValueError):
+        add_node(
+            storage=storage,
+            arguments={"session_id": "ses_1", "parent_id": "r1",
+                       "type": "question", "text": "Q?",
+                       "provenance": "bogus"},
+            now="2026-05-22T00:00:00Z",
+            new_id=lambda p: "n1",
+        )
+
+
+def test_add_node_manual_provenance(tmp_db_path):
+    """add_node(provenance='manual') for user-edited nodes."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    result = add_node(
+        storage=storage,
+        arguments={"session_id": "ses_1", "parent_id": "r1",
+                   "type": "decision", "text": "D",
+                   "provenance": "manual"},
+        now="2026-05-22T00:00:00Z",
+        new_id=lambda p: "n1",
+    )
+    assert result["node"]["provenance"] == "manual"
+
+
+def test_add_node_default_state_active(tmp_db_path):
+    """When state arg is omitted, default = 'active'."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    result = add_node(
+        storage=storage,
+        arguments={"session_id": "ses_1", "parent_id": "r1",
+                   "type": "question", "text": "Q?"},
+        now="2026-05-22T00:00:00Z",
+        new_id=lambda p: "n1",
+    )
+    assert result["node"]["state"] == "active"
+
+
+# ---------------------------------------------------------------------------
 # Task 6: add_node v3 extension, set_focus root_id, list_open_nodes state
 # ---------------------------------------------------------------------------
 

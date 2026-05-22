@@ -148,6 +148,16 @@ async def list_tools() -> list[types.Tool]:
                         "type": ["string", "null"],
                         "description": "Optional textual description of the conditions that mark this subgraph achieved.",
                     },
+                    "provenance": {
+                        "type": "string",
+                        "enum": ["grounded", "inferred", "imported", "manual"],
+                        "description": "Node origin: grounded (conversation), inferred (claude guess), imported (external doc), manual (/dpd-edit)",
+                    },
+                    "state": {
+                        "type": "string",
+                        "enum": ["active", "archived", "closed", "deletable", "gone"],
+                        "description": "Node state (default 'active'). Used by /dpd-import to start archived.",
+                    },
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
