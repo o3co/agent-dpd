@@ -1425,6 +1425,236 @@ class Storage:
             ).fetchone()
         return {key: updated[key] for key in updated.keys()}
 
+    # ------------------------------------------------------------------
+    # v0.3.1 Task 7: bulk_import_subgraph
+    # ------------------------------------------------------------------
+
+    def bulk_import_subgraph(
+        self,
+        *,
+        session_id: str,
+        root_id: str,
+        nodes: list[dict],
+        edges: list[dict],
+        provenance: str = "imported",
+        state: str = "archived",
+        now: str,
+    ) -> dict:
+        """Atomically import a multi-node + edge subgraph under an existing root.
+
+        Algorithm:
+        1. Validate root_id exists in this session.
+        2. Build a dependency graph from the nodes list (parent_id → child).
+        3. Topological sort to determine insert order (parents before children).
+        4. Detect cycles — raise ValueError if any cycle is found.
+        5. Pre-flight: validate all parent_id / paired_for refs resolve to one of:
+           - root_id
+           - Another id in the nodes list
+           - A pre-existing node id in DB (checked inside the transaction)
+        6. Within a single transaction:
+           a. INSERT nodes in topo order (parent always inserted before child).
+           b. INSERT edges (from/to must exist in DB at this point).
+        7. Return all inserted rows.
+
+        Raises ValueError for:
+          - root_id not found in session
+          - Cycle in parent_id chain
+          - parent_id / paired_for ref that doesn't resolve
+          - edge endpoint that doesn't resolve
+          - Duplicate node id in import set (sqlite3.IntegrityError → ValueError)
+        """
+        # Step 1: validate root_id
+        with self.connect() as conn:
+            root_row = conn.execute(
+                "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                (session_id, root_id),
+            ).fetchone()
+        if root_row is None:
+            raise ValueError(
+                f"root_id {root_id!r} not found in session {session_id!r}"
+            )
+
+        # Step 2 & 3 & 4: topological sort with cycle detection
+        # Build a map of id → node spec and adjacency list (parent → [children]).
+        # Detect duplicate ids first.
+        seen_ids: set[str] = set()
+        for node in nodes:
+            nid = node["id"]
+            if nid in seen_ids:
+                raise ValueError(
+                    f"bulk_import: duplicate node id {nid!r} in import set"
+                )
+            seen_ids.add(nid)
+
+        import_ids: set[str] = {n["id"] for n in nodes}
+        node_map: dict[str, dict] = {n["id"]: n for n in nodes}
+
+        # Kahn's algorithm: compute in-degree within import set.
+        # Edge: parent_id → child (if parent_id is in import set).
+        in_degree: dict[str, int] = {nid: 0 for nid in import_ids}
+        children_of: dict[str, list[str]] = {nid: [] for nid in import_ids}
+
+        for node in nodes:
+            pid = node.get("parent_id")
+            if pid is not None and pid in import_ids:
+                in_degree[node["id"]] += 1
+                children_of[pid].append(node["id"])
+
+        queue = [nid for nid in import_ids if in_degree[nid] == 0]
+        topo_order: list[str] = []
+        while queue:
+            nid = queue.pop(0)
+            topo_order.append(nid)
+            for child in children_of[nid]:
+                in_degree[child] -= 1
+                if in_degree[child] == 0:
+                    queue.append(child)
+
+        if len(topo_order) != len(import_ids):
+            raise ValueError(
+                "cycle detected in parent_id chain within imported nodes"
+            )
+
+        # Step 5 & 6: single transaction — insert nodes then edges
+        import sqlite3 as _sqlite3
+
+        with self.connect() as conn:
+            # Track ids that are now available as parents (inserted or pre-existing).
+            # Pre-check: root_id is a valid reference.
+            # We'll validate each node's parent_id at insert time within the tx.
+
+            inserted_node_ids: set[str] = set()
+
+            for nid in topo_order:
+                node = node_map[nid]
+                pid = node.get("parent_id")
+                pkind = node.get("parent_kind")
+                paired_for = node.get("paired_for") or None
+                achievement_conditions = node.get("achievement_conditions") or None
+                node_type = node["type"]
+                text = node["text"]
+
+                # Validate parent_id resolves.
+                if pid is None:
+                    raise ValueError(
+                        f"node {nid!r}: parent_id is required"
+                    )
+                if pid in inserted_node_ids:
+                    # Already inserted in this batch
+                    pass
+                elif pid == root_id:
+                    pass
+                else:
+                    # Must be a pre-existing node or root in DB
+                    existing = conn.execute(
+                        "SELECT 1 FROM nodes WHERE session_id = ? AND id = ? "
+                        "UNION ALL "
+                        "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                        (session_id, pid, session_id, pid),
+                    ).fetchone()
+                    if existing is None:
+                        raise ValueError(
+                            f"node {nid!r}: parent_id {pid!r} not found "
+                            f"in import set or DB"
+                        )
+
+                # Validate paired_for resolves.
+                if paired_for is not None:
+                    if paired_for not in import_ids and paired_for not in inserted_node_ids:
+                        # Must be pre-existing in DB
+                        pf_existing = conn.execute(
+                            "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
+                            (session_id, paired_for),
+                        ).fetchone()
+                        if pf_existing is None:
+                            raise ValueError(
+                                f"node {nid!r}: paired_for {paired_for!r} not found "
+                                f"in import set or DB"
+                            )
+
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO nodes
+                            (id, session_id, type, text, status, closure_reason,
+                             parent_id, parent_kind,
+                             paired_for, achievement_conditions,
+                             achievement_conditions_satisfied, state, provenance,
+                             archived_at, closed_at, deletable_at,
+                             created_at, updated_at)
+                        VALUES (?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?, 0, ?, ?,
+                                NULL, NULL, NULL, ?, ?)
+                        """,
+                        (nid, session_id, node_type, text,
+                         pid, pkind,
+                         paired_for, achievement_conditions,
+                         state, provenance,
+                         now, now),
+                    )
+                except _sqlite3.IntegrityError as exc:
+                    raise ValueError(
+                        f"bulk_import: failed to insert node {nid!r}: {exc}"
+                    ) from exc
+
+                inserted_node_ids.add(nid)
+
+            # Insert edges
+            inserted_edges: list[dict] = []
+            for edge_spec in edges:
+                from_node = edge_spec["from"]
+                to_node = edge_spec["to"]
+                edge_type = edge_spec["type"]
+                reason = edge_spec.get("reason") or None
+
+                # Validate both endpoints
+                for label, endpoint in (("from", from_node), ("to", to_node)):
+                    if endpoint in inserted_node_ids:
+                        continue
+                    exists = conn.execute(
+                        "SELECT 1 FROM nodes WHERE session_id = ? AND id = ? "
+                        "UNION ALL "
+                        "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                        (session_id, endpoint, session_id, endpoint),
+                    ).fetchone()
+                    if exists is None:
+                        raise ValueError(
+                            f"edge {label} endpoint {endpoint!r} not found "
+                            f"in import set or DB"
+                        )
+
+                try:
+                    cur = conn.execute(
+                        "INSERT INTO edges "
+                        "(session_id, from_node, to_node, type, reason, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (session_id, from_node, to_node, edge_type, reason, now),
+                    )
+                except _sqlite3.IntegrityError as exc:
+                    raise ValueError(
+                        f"bulk_import: failed to insert edge {from_node!r}→{to_node!r}: {exc}"
+                    ) from exc
+
+                edge_row = conn.execute(
+                    "SELECT * FROM edges WHERE id = ?", (cur.lastrowid,)
+                ).fetchone()
+                inserted_edges.append({k: edge_row[k] for k in edge_row.keys()})
+
+            self._touch_session(conn, session_id=session_id, now=now)
+
+            # Fetch inserted node rows
+            imported_nodes: list[dict] = []
+            for nid in topo_order:
+                row = conn.execute(
+                    "SELECT * FROM nodes WHERE session_id = ? AND id = ?",
+                    (session_id, nid),
+                ).fetchone()
+                imported_nodes.append({k: row[k] for k in row.keys()})
+
+        return {
+            "imported_nodes": imported_nodes,
+            "imported_edges": inserted_edges,
+        }
+
     def force_delete_node(
         self, *, session_id: str, node_id: str, now: str,
     ) -> None:

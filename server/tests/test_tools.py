@@ -2002,3 +2002,278 @@ def test_set_session_mode_invalid_mode_value_raises(tmp_db_path: str) -> None:
             arguments={"session_id": sid, "mode": "bogus"},
             now="2026-05-22T01:00:00Z",
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 7: bulk_import_subgraph
+# ---------------------------------------------------------------------------
+
+
+def _setup_bulk_import(storage: Storage) -> tuple[str, str]:
+    """Create a session + root, return (session_id, root_id)."""
+    from dpd_mcp_server import tools as t
+    t.start_session(
+        storage=storage, arguments={}, now="2026-05-22T10:00:00Z",
+        new_id=lambda p: "ses_bi",
+    )
+    t.spawn_root(
+        storage=storage,
+        arguments={"session_id": "ses_bi", "topic": "Import test"},
+        now="2026-05-22T10:00:00Z",
+        new_id=lambda p: "root_bi",
+    )
+    return "ses_bi", "root_bi"
+
+
+def test_bulk_import_creates_all_nodes_atomically(tmp_db_path: str) -> None:
+    """Import 5 nodes in a tree. All inserted with provenance='imported', state='archived'."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q1", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        {"id": "n2", "type": "hypothesis", "text": "H1", "parent_id": "n1", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+        {"id": "n3", "type": "hypothesis", "text": "H2", "parent_id": "n1", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+        {"id": "n4", "type": "evidence", "text": "E1", "parent_id": "n2", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+        {"id": "n5", "type": "evidence", "text": "E2", "parent_id": "n3", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+    ]
+    result = t.bulk_import_subgraph(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+        now="2026-05-22T10:01:00Z",
+    )
+
+    assert len(result["imported_nodes"]) == 5
+    for row in result["imported_nodes"]:
+        assert row["provenance"] == "imported"
+        assert row["state"] == "archived"
+        assert row["session_id"] == sid
+
+
+def test_bulk_import_creates_edges(tmp_db_path: str) -> None:
+    """Import 3 nodes + 2 edges. Edges visible via list_edges."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        {"id": "n2", "type": "hypothesis", "text": "H1", "parent_id": "n1", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+        {"id": "n3", "type": "hypothesis", "text": "H2", "parent_id": "n1", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+    ]
+    edges = [
+        {"from": "n2", "to": "n3", "type": "contradicts", "reason": "mutually exclusive"},
+        {"from": "n3", "to": "n1", "type": "supports", "reason": None},
+    ]
+    result = t.bulk_import_subgraph(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": edges},
+        now="2026-05-22T10:01:00Z",
+    )
+
+    assert len(result["imported_edges"]) == 2
+    all_edges = storage.list_edges(session_id=sid)
+    assert len(all_edges) == 2
+
+
+def test_bulk_import_rolls_back_on_fk_failure(tmp_db_path: str) -> None:
+    """If one node has invalid parent_id, transaction rolls back, no partial state."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        {"id": "n2", "type": "hypothesis", "text": "H", "parent_id": "nonexistent_parent", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+    ]
+    with pytest.raises(ValueError, match="parent_id|nonexistent_parent|not found"):
+        t.bulk_import_subgraph(
+            storage=storage,
+            arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+            now="2026-05-22T10:01:00Z",
+        )
+
+    # No partial state: n1 was not inserted
+    assert storage.get_node(session_id=sid, node_id="n1") is None
+
+
+def test_bulk_import_rolls_back_on_duplicate_id(tmp_db_path: str) -> None:
+    """If imported nodes contain duplicate ids, rollback."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "dup", "type": "question", "text": "Q1", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        {"id": "dup", "type": "question", "text": "Q2", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+    ]
+    with pytest.raises((ValueError, Exception)):
+        t.bulk_import_subgraph(
+            storage=storage,
+            arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+            now="2026-05-22T10:01:00Z",
+        )
+
+    # No partial state
+    assert storage.get_node(session_id=sid, node_id="dup") is None
+
+
+def test_bulk_import_default_provenance_imported(tmp_db_path: str) -> None:
+    """All imported nodes have provenance='imported' by default."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+    ]
+    result = t.bulk_import_subgraph(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+        now="2026-05-22T10:01:00Z",
+    )
+    assert result["imported_nodes"][0]["provenance"] == "imported"
+
+
+def test_bulk_import_default_state_archived(tmp_db_path: str) -> None:
+    """All imported nodes have state='archived' by default."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+    ]
+    result = t.bulk_import_subgraph(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+        now="2026-05-22T10:01:00Z",
+    )
+    assert result["imported_nodes"][0]["state"] == "archived"
+
+
+def test_bulk_import_custom_provenance_state(tmp_db_path: str) -> None:
+    """provenance='inferred', state='active' overrides apply to all nodes."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        {"id": "n2", "type": "hypothesis", "text": "H", "parent_id": "n1", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+    ]
+    result = t.bulk_import_subgraph(
+        storage=storage,
+        arguments={
+            "session_id": sid, "root_id": rid, "nodes": nodes, "edges": [],
+            "provenance": "inferred", "state": "active",
+        },
+        now="2026-05-22T10:01:00Z",
+    )
+    for row in result["imported_nodes"]:
+        assert row["provenance"] == "inferred"
+        assert row["state"] == "active"
+
+
+def test_bulk_import_paired_for_resolves(tmp_db_path: str) -> None:
+    """End node paired_for refers to Start node in same import — resolves correctly."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "s1", "type": "start", "text": "Start", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        {"id": "e1", "type": "end", "text": "End", "parent_id": "s1", "parent_kind": "node", "paired_for": "s1", "achievement_conditions": None},
+    ]
+    result = t.bulk_import_subgraph(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+        now="2026-05-22T10:01:00Z",
+    )
+    assert len(result["imported_nodes"]) == 2
+    end_node = next(r for r in result["imported_nodes"] if r["id"] == "e1")
+    assert end_node["paired_for"] == "s1"
+
+
+def test_bulk_import_edge_to_external_node(tmp_db_path: str) -> None:
+    """Edge from imported node to pre-existing DB node works."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    # Pre-existing node
+    t.add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": rid, "type": "question", "text": "Existing"},
+        now="2026-05-22T10:00:30Z",
+        new_id=lambda p: "existing_node",
+    )
+
+    nodes = [
+        {"id": "n1", "type": "hypothesis", "text": "H", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+    ]
+    edges = [
+        {"from": "n1", "to": "existing_node", "type": "supports", "reason": None},
+    ]
+    result = t.bulk_import_subgraph(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": edges},
+        now="2026-05-22T10:01:00Z",
+    )
+    assert len(result["imported_edges"]) == 1
+    assert result["imported_edges"][0]["to_node"] == "existing_node"
+
+
+def test_bulk_import_empty_edges_list_ok(tmp_db_path: str) -> None:
+    """edges=[] is valid (nodes-only import)."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+    ]
+    result = t.bulk_import_subgraph(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+        now="2026-05-22T10:01:00Z",
+    )
+    assert result["imported_edges"] == []
+    assert len(result["imported_nodes"]) == 1
+
+
+def test_bulk_import_cycle_detection(tmp_db_path: str) -> None:
+    """A→B→A cycle in parent_id chain raises ValueError."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    # n1 parent = n2, n2 parent = n1: cycle
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": "n2", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+        {"id": "n2", "type": "hypothesis", "text": "H", "parent_id": "n1", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+    ]
+    with pytest.raises(ValueError, match="cycle|circular"):
+        t.bulk_import_subgraph(
+            storage=storage,
+            arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+            now="2026-05-22T10:01:00Z",
+        )
+
+
+def test_bulk_import_unknown_root_raises(tmp_db_path: str) -> None:
+    """Non-existent root_id raises ValueError before any insert."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": "ghost_root", "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+    ]
+    with pytest.raises(ValueError, match="root_id|ghost_root|not found"):
+        t.bulk_import_subgraph(
+            storage=storage,
+            arguments={"session_id": sid, "root_id": "ghost_root", "nodes": nodes, "edges": []},
+            now="2026-05-22T10:01:00Z",
+        )

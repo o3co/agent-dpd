@@ -833,6 +833,36 @@ def force_delete(
     return {"node_id": node_id_, "force_deleted_at": now}
 
 
+def bulk_import_subgraph(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Atomically import a multi-node + edge subgraph under an existing root.
+
+    Validates all FK refs pre-flight (root_id, parent_id, paired_for, edge
+    endpoints), performs topological sort + cycle detection, then inserts
+    everything in a single transaction. Full rollback on any failure.
+    """
+    session_id = _required(arguments, "session_id")
+    root_id = _required(arguments, "root_id")
+    nodes = arguments.get("nodes") or []
+    edges = arguments.get("edges") or []
+    provenance = arguments.get("provenance") or "imported"
+    state = arguments.get("state") or "archived"
+
+    return storage.bulk_import_subgraph(
+        session_id=session_id,
+        root_id=root_id,
+        nodes=nodes,
+        edges=edges,
+        provenance=provenance,
+        state=state,
+        now=now,
+    )
+
+
 def set_session_mode(
     *,
     storage: Storage,

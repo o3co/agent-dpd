@@ -1,4 +1,4 @@
-"""MCP server wiring: register the 30 DPD tools over stdio."""
+"""MCP server wiring: register the 31 DPD tools over stdio."""
 
 from __future__ import annotations
 
@@ -800,6 +800,68 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="bulk_import_subgraph",
+            title="Bulk import subgraph",
+            description=(
+                "Atomically import a multi-node + edge subgraph under an existing root. "
+                "Used by /dpd-import to construct a hypothetical archived subgraph from "
+                "external prose/spec/graph. All FK refs validated pre-flight; full rollback "
+                "on any failure."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "root_id", "nodes"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "root_id": {"type": "string"},
+                    "nodes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["id", "type", "text", "parent_id", "parent_kind"],
+                            "properties": {
+                                "id": {"type": "string"},
+                                "type": {"type": "string"},
+                                "text": {"type": "string"},
+                                "parent_id": {"type": ["string", "null"]},
+                                "parent_kind": {"type": "string", "enum": ["node", "root"]},
+                                "paired_for": {"type": ["string", "null"]},
+                                "achievement_conditions": {"type": ["string", "null"]},
+                            },
+                        },
+                    },
+                    "edges": {
+                        "type": "array",
+                        "default": [],
+                        "items": {
+                            "type": "object",
+                            "required": ["from", "to", "type"],
+                            "properties": {
+                                "from": {"type": "string"},
+                                "to": {"type": "string"},
+                                "type": {"type": "string"},
+                                "reason": {"type": ["string", "null"]},
+                            },
+                        },
+                    },
+                    "provenance": {
+                        "type": "string",
+                        "enum": ["grounded", "inferred", "imported", "manual"],
+                        "default": "imported",
+                    },
+                    "state": {
+                        "type": "string",
+                        "enum": ["active", "archived", "closed", "deletable", "gone"],
+                        "default": "archived",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
     ]
     by_name = {t.name: t for t in tools}
     for old, new in LEGACY_ALIASES.items():
@@ -914,6 +976,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.pool_reject(storage, arguments=tool_args, now=now)
     if name == "set_session_mode":
         return tools.set_session_mode(
+            storage=storage, arguments=tool_args, now=now
+        )
+    if name == "bulk_import_subgraph":
+        return tools.bulk_import_subgraph(
             storage=storage, arguments=tool_args, now=now
         )
 
