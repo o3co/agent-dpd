@@ -1105,3 +1105,79 @@ def test_pool_drop_marks_active_false(tmp_db_path):
                               arguments={"active_only": True},
                               now="...")
     assert actives["items"] == []
+
+
+# ---------------------------------------------------------------------------
+# Task 6: add_node v3 extension, set_focus root_id, list_open_nodes state
+# ---------------------------------------------------------------------------
+
+
+def test_add_node_end_with_paired_for(tmp_db_path):
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    # Start node
+    start = add_node(
+        storage=storage,
+        arguments={"session_id": "ses_1", "parent_id": "r1",
+                   "type": "start", "text": "S"},
+        now="2026-05-22T00:00:00Z",
+        new_id=lambda p: "n_start",
+    )
+    assert start["node"]["type"] == "start"
+    sid = start["node"]["id"]
+    # End node with paired_for
+    end = add_node(
+        storage=storage,
+        arguments={"session_id": "ses_1", "parent_id": sid,
+                   "type": "end", "text": "E",
+                   "paired_for": sid,
+                   "achievement_conditions": "done when X"},
+        now="2026-05-22T00:00:00Z",
+        new_id=lambda p: "n_end",
+    )
+    assert end["node"]["type"] == "end"
+    assert end["node"]["paired_for"] == sid
+
+
+def test_set_focus_accepts_root_id(tmp_db_path):
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    result = set_focus(
+        storage=storage,
+        arguments={"session_id": "ses_1", "node_id": "r1"},
+        now="2026-05-22T00:00:00Z",
+    )
+    assert result["focus_node_id"] == "r1"
+
+
+def test_list_open_nodes_filters_by_state(tmp_db_path):
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_a", session_id="ses_1",
+                           node_type="question", text="a",
+                           parent_id="r1", parent_kind="root",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_b", session_id="ses_1",
+                           node_type="question", text="b",
+                           parent_id="r1", parent_kind="root",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    # Force n_b into closed state.
+    with storage.connect() as conn:
+        conn.execute("UPDATE nodes SET state = 'closed' WHERE id = 'n_b'")
+    result = list_open_nodes(
+        storage=storage,
+        arguments={"session_id": "ses_1", "state": "active"},
+    )
+    ids = {n["id"] for n in result["nodes"]}
+    assert ids == {"n_a"}

@@ -118,15 +118,36 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="add_node",
             title="Add node",
-            description="Add a child node under a root or node.",
+            description=(
+                "Add a child node under a root or node. "
+                "v3 fields: type 'start'/'end' and optional paired_for / "
+                "achievement_conditions are supported. For 'end' nodes, "
+                "paired_for (the Start node id) is required. "
+                "Backward-compatible: omitting v3 fields follows v2 behavior."
+            ),
             inputSchema={
                 "type": "object",
                 "required": ["session_id", "parent_id", "type", "text"],
                 "properties": {
                     "session_id": {"type": "string"},
                     "parent_id": {"type": "string"},
-                    "type": {"type": "string"},
+                    "type": {
+                        "type": "string",
+                        "description": (
+                            "Node type. v2 types: question, answer, hypothesis, "
+                            "evidence, decision, rationale. "
+                            "v3 additions: start, end."
+                        ),
+                    },
                     "text": {"type": "string"},
+                    "paired_for": {
+                        "type": ["string", "null"],
+                        "description": "For 'end' nodes: the id of the paired 'start' node.",
+                    },
+                    "achievement_conditions": {
+                        "type": ["string", "null"],
+                        "description": "Optional textual description of the conditions that mark this subgraph achieved.",
+                    },
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
@@ -259,7 +280,8 @@ async def list_tools() -> list[types.Tool]:
             title="Set focus node",
             description=(
                 "Set or clear sessions.focus_node_id. Pass node_id=null (or omit) "
-                "to clear focus. Validates the node exists in the session."
+                "to clear focus. Validates the id exists in the session — accepts "
+                "both node ids and root ids as the focus target."
             ),
             inputSchema={
                 "type": "object",
@@ -268,7 +290,10 @@ async def list_tools() -> list[types.Tool]:
                     "session_id": {"type": "string"},
                     "node_id": {
                         "type": ["string", "null"],
-                        "description": "Target node id, or null to clear focus.",
+                        "description": (
+                            "Target node id or root id, or null to clear focus. "
+                            "Both nodes and roots are valid focus targets."
+                        ),
                     },
                     "agent_scope": {
                         "type": ["string", "null"],
@@ -307,8 +332,8 @@ async def list_tools() -> list[types.Tool]:
             title="List open nodes",
             description=(
                 "Return open nodes in the session, optionally restricted to one root's "
-                "subtree. Powers next_focus selection (deepest-within after recency-"
-                "ranked root)."
+                "subtree and/or filtered by the state column. Powers next_focus "
+                "selection (deepest-within after recency-ranked root)."
             ),
             inputSchema={
                 "type": "object",
@@ -318,6 +343,14 @@ async def list_tools() -> list[types.Tool]:
                     "root_id": {
                         "type": ["string", "null"],
                         "description": "If given, restrict to this root's subtree.",
+                    },
+                    "state": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "Optional filter on the state column "
+                            "(e.g. 'active', 'closed', 'deletable'). "
+                            "Omit to return all open nodes regardless of state."
+                        ),
                     },
                     "agent_scope": {
                         "type": ["string", "null"],

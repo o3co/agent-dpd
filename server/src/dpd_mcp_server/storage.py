@@ -235,6 +235,26 @@ class Storage:
             )
             self._touch_session(conn, session_id=session_id, now=now)
 
+    def classify_parent_kind(self, *, session_id: str, parent_id: str) -> str:
+        """Return 'root' or 'node' based on where parent_id exists in this session.
+
+        Raises ValueError if parent_id is not found in either roots or nodes.
+        """
+        with self.connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                (session_id, parent_id),
+            ).fetchone():
+                return "root"
+            if conn.execute(
+                "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
+                (session_id, parent_id),
+            ).fetchone():
+                return "node"
+        raise ValueError(
+            f"parent_id {parent_id!r} not found in session {session_id!r}"
+        )
+
     def insert_node_under_parent(
         self,
         *,
@@ -324,14 +344,18 @@ class Storage:
     ) -> None:
         """Set or clear sessions.focus_node_id.
 
-        When ``node_id`` is not None, validates that the node exists in the
-        session. Always validates that the session exists. Bumps updated_at.
+        When ``node_id`` is not None, validates that the id exists in the
+        session — checking both nodes and roots (so root_id can be used as
+        a focus target per dogfood obs #5). Always validates that the session
+        exists. Bumps updated_at.
         """
         with self.connect() as conn:
             if node_id is not None:
                 exists = conn.execute(
-                    "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
-                    (session_id, node_id),
+                    "SELECT 1 FROM nodes WHERE session_id = ? AND id = ? "
+                    "UNION ALL "
+                    "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                    (session_id, node_id, session_id, node_id),
                 ).fetchone()
                 if exists is None:
                     raise ValueError(
@@ -371,25 +395,37 @@ class Storage:
         *,
         session_id: str,
         root_id: str | None = None,
+        state: str | None = None,
     ) -> list[sqlite3.Row]:
-        """Return open nodes in the session, optionally restricted to one root.
+        """Return open nodes in the session, optionally restricted to one root
+        and/or filtered by the ``state`` column.
 
         With ``root_id=None``, returns every node with status='open' in the
         session (creation-order). With a root, walks that root's subtree and
         filters to open nodes.
+
+        When ``state`` is provided, the result is further filtered to nodes
+        whose ``state`` column matches the given value (e.g. ``'active'``).
+        When ``state`` is None (default), no state filter is applied —
+        preserving v2 behavior.
         """
         if root_id is None:
+            sql = (
+                "SELECT * FROM nodes "
+                "WHERE session_id = ? AND status = 'open'"
+            )
+            params: list[Any] = [session_id]
+            if state is not None:
+                sql += " AND state = ?"
+                params.append(state)
+            sql += " ORDER BY created_at, id"
             with self.connect() as conn:
-                return list(
-                    conn.execute(
-                        "SELECT * FROM nodes "
-                        "WHERE session_id = ? AND status = 'open' "
-                        "ORDER BY created_at, id",
-                        (session_id,),
-                    )
-                )
+                return list(conn.execute(sql, params))
         subtree = self.walk_subtree(session_id=session_id, root_id=root_id)
-        return [n for n in subtree if n["status"] == "open"]
+        nodes = [n for n in subtree if n["status"] == "open"]
+        if state is not None:
+            nodes = [n for n in nodes if n["state"] == state]
+        return nodes
 
     def add_edge(
         self,

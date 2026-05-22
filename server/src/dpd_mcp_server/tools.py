@@ -54,6 +54,9 @@ def spawn_root(
     return {"root": _row_to_dict(row)}
 
 
+_V3_NODE_TYPES = {"start", "end"}
+
+
 def add_node(
     *,
     storage: Storage,
@@ -65,22 +68,50 @@ def add_node(
     parent_id = _required(arguments, "parent_id")
     node_type = _required(arguments, "type")
     text = _required(arguments, "text")
+    paired_for = arguments.get("paired_for") or None
+    achievement_conditions = arguments.get("achievement_conditions") or None
 
-    node_id = new_id("node")
-    try:
-        storage.insert_node_under_parent(
-            node_id=node_id,
-            session_id=session_id,
-            node_type=node_type,
-            text=text,
-            parent_id=parent_id,
-            now=now,
-        )
-    except sqlite3.IntegrityError as exc:
-        raise ValueError(
-            f"cannot add node in session {session_id!r}: {exc}"
-        ) from exc
-    row = storage.get_node(session_id=session_id, node_id=node_id)
+    nid = new_id("node")
+
+    is_v3 = node_type in _V3_NODE_TYPES or paired_for is not None or achievement_conditions is not None
+    if is_v3:
+        # Classify parent_kind via the same logic as insert_node_under_parent.
+        # Re-use the DB queries directly so parent-existence validation is atomic.
+        try:
+            parent_kind = storage.classify_parent_kind(
+                session_id=session_id, parent_id=parent_id
+            )
+            storage.insert_node_v3(
+                node_id=nid,
+                session_id=session_id,
+                node_type=node_type,
+                text=text,
+                parent_id=parent_id,
+                parent_kind=parent_kind,
+                paired_for=paired_for,
+                achievement_conditions=achievement_conditions,
+                now=now,
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(
+                f"cannot add node in session {session_id!r}: {exc}"
+            ) from exc
+    else:
+        try:
+            storage.insert_node_under_parent(
+                node_id=nid,
+                session_id=session_id,
+                node_type=node_type,
+                text=text,
+                parent_id=parent_id,
+                now=now,
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(
+                f"cannot add node in session {session_id!r}: {exc}"
+            ) from exc
+
+    row = storage.get_node(session_id=session_id, node_id=nid)
     return {"node": _row_to_dict(row)}
 
 
@@ -236,7 +267,8 @@ def list_open_nodes(
 ) -> dict[str, Any]:
     session_id = _required(arguments, "session_id")
     root_id = arguments.get("root_id") or None
-    rows = storage.list_open_nodes(session_id=session_id, root_id=root_id)
+    state = arguments.get("state") or None
+    rows = storage.list_open_nodes(session_id=session_id, root_id=root_id, state=state)
     return {"nodes": [_row_to_dict(r) for r in rows]}
 
 
