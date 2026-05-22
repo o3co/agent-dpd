@@ -191,15 +191,16 @@ class Storage:
         session_id: str,
         scope: str | None,
         label: str | None,
+        mode: str = "entry",
         now: str,
     ) -> None:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sessions (id, scope, label, started_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sessions (id, scope, label, mode, started_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, scope, label, now, now),
+                (session_id, scope, label, mode, now, now),
             )
 
     def get_session(self, *, session_id: str) -> sqlite3.Row | None:

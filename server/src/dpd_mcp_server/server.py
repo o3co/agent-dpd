@@ -94,6 +94,12 @@ async def list_tools() -> list[types.Tool]:
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
                     },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["entry", "ambient", "idle"],
+                        "default": "entry",
+                        "description": "Session mode (default 'entry'). Transitions via set_session_mode.",
+                    },
                 },
             },
         ),

@@ -14,6 +14,9 @@ from typing import Any
 from .storage import Storage
 
 
+_VALID_SESSION_MODES = {"entry", "ambient", "idle"}
+
+
 def start_session(
     *,
     storage: Storage,
@@ -21,11 +24,17 @@ def start_session(
     now: str,
     new_id: Callable[[str], str],
 ) -> dict[str, Any]:
+    mode = arguments.get("mode") or "entry"
+    if mode not in _VALID_SESSION_MODES:
+        raise ValueError(
+            f"invalid mode {mode!r}; must be one of {sorted(_VALID_SESSION_MODES)}"
+        )
     session_id = new_id("ses")
     storage.insert_session(
         session_id=session_id,
         scope=arguments.get("scope") or None,
         label=arguments.get("label") or None,
+        mode=mode,
         now=now,
     )
     return {"session_id": session_id}

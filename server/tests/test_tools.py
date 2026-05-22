@@ -425,6 +425,43 @@ def test_start_session_coerces_empty_scope_and_label_to_none(storage: Storage) -
     assert row["label"] is None
 
 
+def test_start_session_default_mode_entry(storage: Storage) -> None:
+    """Without mode arg, sessions.mode = 'entry'."""
+    result = start_session(
+        storage=storage,
+        arguments={},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: f"{p}_m0",
+    )
+
+    row = storage.get_session(session_id=result["session_id"])
+    assert row["mode"] == "entry"
+
+
+def test_start_session_explicit_mode_idle(storage: Storage) -> None:
+    """start_session(mode='idle') stores 'idle'."""
+    result = start_session(
+        storage=storage,
+        arguments={"mode": "idle"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: f"{p}_m1",
+    )
+
+    row = storage.get_session(session_id=result["session_id"])
+    assert row["mode"] == "idle"
+
+
+def test_start_session_invalid_mode_raises(storage: Storage) -> None:
+    """start_session(mode='bogus') raises ValueError."""
+    with pytest.raises(ValueError, match="mode"):
+        start_session(
+            storage=storage,
+            arguments={"mode": "bogus"},
+            now="2026-05-20T10:00:00Z",
+            new_id=lambda p: f"{p}_m2",
+        )
+
+
 def test_spawn_root_invalid_session_raises_value_error(storage: Storage) -> None:
     with pytest.raises(ValueError):
         spawn_root(
