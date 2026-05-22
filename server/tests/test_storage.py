@@ -1753,6 +1753,82 @@ def test_storage_open_migrates_v2_to_v3_schema(tmp_db_path: str) -> None:
     assert version == 4, f"user_version should be 4, got {version}"
 
 
+def test_storage_open_migrates_v3_to_v4_schema(tmp_db_path: str) -> None:
+    """Storage.open() on a v3-shaped DB must auto-migrate to v4 (= add new columns).
+
+    This test is written RED-first: it FAILS before the Storage.open() v3→v4
+    dispatch is fixed (Issue 1) and PASSES after.
+    """
+    # Step 1: Build a v3-shaped DB by hand (no provenance, no mode, no rejected_at).
+    # Mirror the _downgrade_to_v3 helper from test_migrate_v3_to_v4.py.
+    conn = sqlite3.connect(tmp_db_path)
+    conn.executescript("""
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, scope TEXT, label TEXT,
+            started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            focus_node_id TEXT
+        );
+        CREATE TABLE roots (
+            id TEXT PRIMARY KEY, session_id TEXT,
+            scope TEXT, scope_root INTEGER NOT NULL DEFAULT 0,
+            migrated_to_start_id TEXT,
+            topic TEXT NOT NULL,
+            lifecycle TEXT NOT NULL CHECK (lifecycle IN ('active','archived','deferred')),
+            spawned_at TEXT NOT NULL, last_focused_at TEXT
+        );
+        CREATE TABLE nodes (
+            id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            type TEXT NOT NULL, text TEXT NOT NULL,
+            status TEXT NOT NULL, closure_reason TEXT,
+            parent_id TEXT NOT NULL, parent_kind TEXT NOT NULL,
+            paired_for TEXT,
+            achievement_conditions TEXT,
+            achievement_conditions_satisfied INTEGER NOT NULL DEFAULT 0,
+            state TEXT NOT NULL DEFAULT 'active',
+            archived_at TEXT, closed_at TEXT, deletable_at TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            from_node TEXT NOT NULL, to_node TEXT NOT NULL,
+            type TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL
+        );
+        CREATE TABLE pool_items (
+            id TEXT PRIMARY KEY, scope_root_id TEXT NOT NULL,
+            origin_session_id TEXT, text TEXT NOT NULL,
+            origin_turn TEXT, created_at TEXT NOT NULL,
+            elevated_to TEXT, elevated_at TEXT, dropped_at TEXT, tags TEXT
+        );
+        PRAGMA user_version = 3;
+    """)
+    conn.commit()
+    conn.close()
+
+    # Step 2: Open with Storage.open() — should auto-migrate to v4.
+    storage = Storage.open(tmp_db_path)
+
+    # Step 3: Assert v4 columns exist.
+    with storage.connect() as conn:
+        node_cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)")}
+        assert "provenance" in node_cols, (
+            "v3→v4 auto-migration failed: nodes.provenance missing"
+        )
+
+        session_cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}
+        assert "mode" in session_cols, (
+            "v3→v4 auto-migration failed: sessions.mode missing"
+        )
+
+        pool_cols = {r["name"] for r in conn.execute("PRAGMA table_info(pool_items)")}
+        assert "rejected_at" in pool_cols, (
+            "v3→v4 auto-migration failed: pool_items.rejected_at missing"
+        )
+
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 4, f"expected user_version=4 after migration, got {version}"
+
+
 def test_v3_scope_root_requires_non_null_scope(tmp_db_path: str) -> None:
     """On a freshly-created v3 db, inserting a scope_root row with NULL scope must fail."""
     storage = Storage.open(tmp_db_path)

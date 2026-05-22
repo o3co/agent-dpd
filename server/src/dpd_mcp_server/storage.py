@@ -38,25 +38,29 @@ class Storage:
         from .migrate_v3_to_v4 import migrate as _migrate_v3_to_v4
 
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
+        # Read user_version BEFORE running schema.sql so we can dispatch to the
+        # correct migration path.  schema.sql unconditionally sets user_version=4,
+        # so reading the version after executescript() would always return 4 and
+        # make the v3→v4 branch unreachable for genuine v3 databases.
+        with sqlite3.connect(db_path) as conn:
+            pre_schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+        # Run structural migrations in order BEFORE applying schema.sql.
+        # schema.sql uses CREATE TABLE IF NOT EXISTS and is idempotent, so it
+        # is safe to run after the migration has already added the new columns.
+        if 0 < pre_schema_version < 3:
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("PRAGMA busy_timeout = 5000")
+                cls._migrate_v2_to_v3(conn)
+        elif pre_schema_version == 3:
+            _migrate_v3_to_v4(db_path=db_path)
+
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
             conn.execute("PRAGMA journal_mode = WAL")
-
-            user_version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if 0 < user_version < 3:
-                cls._migrate_v2_to_v3(conn)
-
             schema = files("dpd_mcp_server").joinpath("schema.sql").read_text()
             conn.executescript(schema)
-
-        # Run v3→v4 migration after schema.sql if the DB was at v3 before open.
-        # We re-read user_version from the file to handle both the v2→v3→now-at-4
-        # case (schema.sql set it to 4, so this is a no-op) and the genuine v3
-        # case where schema.sql's CREATE TABLE IF NOT EXISTS did not add columns.
-        with sqlite3.connect(db_path) as conn:
-            current_version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if 0 < current_version < 4:
-            _migrate_v3_to_v4(db_path=db_path)
 
         return cls(db_path)
 

@@ -26,7 +26,12 @@ def migrate(*, db_path: str) -> None:
     """Upgrade db at *db_path* from schema v3 to v4 in place.
 
     Idempotent: calling on a v4 (or newer) database is a no-op.
-    Raises on any SQL error; the transaction is rolled back automatically.
+
+    All changes run inside a single Python-managed transaction (BEGIN … COMMIT).
+    On error, the transaction is rolled back automatically. This matches the
+    approach used in migrate_v2_to_v3.py (individual conn.execute() calls)
+    rather than executescript(), which issues an implicit COMMIT before each
+    statement and therefore provides no atomicity guarantee.
     """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -37,23 +42,23 @@ def migrate(*, db_path: str) -> None:
             return
 
         # All changes in a single transaction for atomicity.
-        conn.executescript("""
-            PRAGMA foreign_keys = OFF;
+        conn.execute("PRAGMA foreign_keys = OFF")
 
-            -- 1. sessions: add mode column (nullable, legacy rows get NULL)
-            ALTER TABLE sessions ADD COLUMN mode TEXT;
+        # 1. sessions: add mode column (nullable, legacy rows get NULL)
+        conn.execute("ALTER TABLE sessions ADD COLUMN mode TEXT")
 
-            -- 2. pool_items: add rejected_at, rejected_reason, text_hash
-            ALTER TABLE pool_items ADD COLUMN rejected_at TEXT;
-            ALTER TABLE pool_items ADD COLUMN rejected_reason TEXT;
-            ALTER TABLE pool_items ADD COLUMN text_hash TEXT;
+        # 2. pool_items: add rejected_at, rejected_reason, text_hash
+        conn.execute("ALTER TABLE pool_items ADD COLUMN rejected_at TEXT")
+        conn.execute("ALTER TABLE pool_items ADD COLUMN rejected_reason TEXT")
+        conn.execute("ALTER TABLE pool_items ADD COLUMN text_hash TEXT")
 
-            -- 3. nodes: rebuild table to add provenance with NOT NULL + CHECK.
-            --    SQLite ALTER TABLE ADD COLUMN can add a column with a DEFAULT
-            --    and NOT NULL, but CHECK constraints on ADD COLUMN are only
-            --    enforced on new inserts in some builds, not on the existing
-            --    data. Rebuilding guarantees the CHECK is part of the table
-            --    definition and will be enforced for all future writes.
+        # 3. nodes: rebuild table to add provenance with NOT NULL + CHECK.
+        #    SQLite ALTER TABLE ADD COLUMN can add a column with a DEFAULT
+        #    and NOT NULL, but CHECK constraints on ADD COLUMN are only
+        #    enforced on new inserts in some builds, not on the existing
+        #    data. Rebuilding guarantees the CHECK is part of the table
+        #    definition and will be enforced for all future writes.
+        conn.execute("""
             CREATE TABLE nodes_v4 (
                 id              TEXT PRIMARY KEY,
                 session_id      TEXT NOT NULL REFERENCES sessions(id),
@@ -83,7 +88,9 @@ def migrate(*, db_path: str) -> None:
                 deletable_at    TEXT,
                 created_at      TEXT NOT NULL,
                 updated_at      TEXT NOT NULL
-            );
+            )
+        """)
+        conn.execute("""
             INSERT INTO nodes_v4
                 (id, session_id, type, text, provenance, status, closure_reason,
                  parent_id, parent_kind, paired_for, achievement_conditions,
@@ -93,18 +100,20 @@ def migrate(*, db_path: str) -> None:
                    parent_id, parent_kind, paired_for, achievement_conditions,
                    achievement_conditions_satisfied, state, archived_at, closed_at,
                    deletable_at, created_at, updated_at
-            FROM nodes;
-            DROP TABLE nodes;
-            ALTER TABLE nodes_v4 RENAME TO nodes;
+            FROM nodes
+        """)
+        conn.execute("DROP TABLE nodes")
+        conn.execute("ALTER TABLE nodes_v4 RENAME TO nodes")
 
-            -- 4. Partial index for active pool items (not rejected)
+        # 4. Partial index for active pool items (not rejected)
+        conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_pool_rejected
                 ON pool_items(scope_root_id, created_at)
-                WHERE rejected_at IS NULL;
-
-            PRAGMA foreign_keys = ON;
-            PRAGMA user_version = 4;
+                WHERE rejected_at IS NULL
         """)
+
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA user_version = 4")
         conn.commit()
     except Exception:
         conn.rollback()
