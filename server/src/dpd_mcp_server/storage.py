@@ -850,7 +850,7 @@ class Storage:
         Uses the UNIQUE partial index on (scope) WHERE scope_root=1 to enforce singleton.
         Generated id format: root_<hex8> via ids.root_id().
         """
-        from .ids import root_id  # local import to avoid top-of-file churn
+        from .ids import root_id  # local import: parameter name `root_id` is used elsewhere in this class
         with self.connect() as conn:
             existing = conn.execute(
                 "SELECT * FROM roots WHERE scope = ? AND scope_root = 1",
@@ -858,7 +858,7 @@ class Storage:
             ).fetchone()
             if existing is not None:
                 return existing
-            new_id = root_id()
+            generated_id = root_id()
             conn.execute(
                 """
                 INSERT INTO roots
@@ -866,10 +866,10 @@ class Storage:
                      spawned_at, last_focused_at)
                 VALUES (?, NULL, ?, 1, ?, 'active', ?, NULL)
                 """,
-                (new_id, scope, f"{scope} scope root", now),
+                (generated_id, scope, f"{scope} scope root", now),
             )
             return conn.execute(
-                "SELECT * FROM roots WHERE id = ?", (new_id,)
+                "SELECT * FROM roots WHERE id = ?", (generated_id,)
             ).fetchone()
 
     def insert_pool_item(

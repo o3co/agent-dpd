@@ -17,8 +17,13 @@ def test_new_id_is_unique() -> None:
     assert len(seen) == 100
 
 
-def test_pool_id_format():
+def test_pool_id_format() -> None:
     from dpd_mcp_server.ids import pool_id
     pid = pool_id()
-    assert pid.startswith("pool_")
-    assert len(pid) == len("pool_") + 8
+    assert re.fullmatch(r"pool_[0-9a-f]{8}", pid), pid
+
+
+def test_root_id_format() -> None:
+    from dpd_mcp_server.ids import root_id
+    rid = root_id()
+    assert re.fullmatch(r"root_[0-9a-f]{8}", rid), rid
