@@ -1179,15 +1179,20 @@ class Storage:
                 """,
                 (session_id, *members, *members),
             )
-            # Null out pool_items.elevated_to FK references pointing into this
-            # subgraph — pool items that were elevated into this subgraph must
-            # have their back-pointer cleared before the node rows are removed.
+            # Tombstone pool_items that were elevated into this subgraph.
+            # Nulling elevated_to alone would silently reactivate them (active
+            # filter: elevated_to IS NULL AND dropped_at IS NULL).  Setting
+            # dropped_at preserves the audit trail (elevated_at stays intact)
+            # while preventing zombie resurrection.
             conn.execute(
                 f"""
-                UPDATE pool_items SET elevated_to = NULL
+                UPDATE pool_items
+                SET elevated_to = NULL,
+                    dropped_at = ?,
+                    tags = COALESCE(NULLIF(tags || ',', ','), '') || ?
                 WHERE elevated_to IN ({placeholders})
                 """,
-                (*members,),
+                (now, "dropped:subgraph_deleted", *members),
             )
             conn.execute(
                 f"DELETE FROM nodes WHERE session_id = ? AND id IN ({placeholders})",
@@ -1198,8 +1203,28 @@ class Storage:
     def force_delete_node(
         self, *, session_id: str, node_id: str, now: str,
     ) -> None:
-        """Physical delete a single node regardless of state. Cleans referencing edges."""
+        """Physical delete a single node regardless of state. Cleans referencing edges.
+
+        Handles FK constraints before deletion:
+        1. NULLs paired_for on any End node paired to this node (if target is a Start).
+        2. Tombstones pool_items elevated into this node (NULL + dropped_at + tag)
+           to prevent silent reactivation of the pool item.
+        3. Deletes referencing edges, then the node itself.
+        """
         with self.connect() as conn:
+            # Null paired_for references TO this node (e.g. its paired End node)
+            conn.execute(
+                "UPDATE nodes SET paired_for = NULL "
+                "WHERE session_id = ? AND paired_for = ?",
+                (session_id, node_id),
+            )
+            # Tombstone any pool items elevated into this node
+            conn.execute(
+                "UPDATE pool_items SET elevated_to = NULL, dropped_at = ?, "
+                "tags = COALESCE(NULLIF(tags || ',', ','), '') || ? "
+                "WHERE elevated_to = ?",
+                (now, "dropped:node_force_deleted", node_id),
+            )
             conn.execute(
                 "DELETE FROM edges WHERE session_id = ? "
                 "AND (from_node = ? OR to_node = ?)",

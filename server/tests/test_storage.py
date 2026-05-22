@@ -2035,3 +2035,91 @@ def test_insert_node_v3_raises_when_parent_missing(tmp_db_path: str) -> None:
             paired_for=None, achievement_conditions=None,
             now="2026-05-22T00:00:00Z",
         )
+
+
+def test_delete_subgraph_tombstones_elevated_pool_items(tmp_db_path: str) -> None:
+    """When a subgraph that consumed pool items is deleted, those pool items
+    should be tombstoned (dropped_at set) — not silently reactivated."""
+    storage = Storage.open(tmp_db_path)
+    root = storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T00:00:00Z")
+    storage.insert_session(session_id="ses_1", scope="dpd", label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1",
+                           node_type="start", text="s",
+                           parent_id="r1",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1",
+                           node_type="end", text="e",
+                           parent_id="n_s",
+                           paired_for="n_s",
+                           achievement_conditions="done",
+                           now="2026-05-22T00:00:00Z")
+    # Elevate a pool item into the subgraph
+    storage.insert_pool_item(pool_id="pool_evidence", scope_root_id=root["id"],
+                             text="evidence X", origin_session_id=None,
+                             origin_turn=None, tags=None,
+                             now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_evidence", session_id="ses_1",
+                           node_type="evidence", text="evidence X",
+                           parent_id="n_e",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.mark_pool_elevated(pool_id="pool_evidence", elevated_to="n_evidence",
+                               now="2026-05-22T00:30:00Z")
+    # Run the full lifecycle to delete
+    storage.mark_reached(session_id="ses_1", end_node_id="n_e",
+                         now="2026-05-22T01:00:00Z")
+    storage.dump_persist_subgraph(session_id="ses_1", start_node_id="n_s",
+                                  destination=None,
+                                  now="2026-05-22T02:00:00Z")
+    storage.delete_subgraph(session_id="ses_1", start_node_id="n_s",
+                            now="2026-05-22T03:00:00Z")
+    # Pool item should be tombstoned (dropped_at set), NOT active
+    active_items = storage.list_pool_items(scope_root_id=root["id"], active_only=True)
+    assert active_items == []
+    all_items = storage.list_pool_items(scope_root_id=root["id"], active_only=False)
+    assert len(all_items) == 1
+    assert all_items[0]["dropped_at"] is not None  # tombstoned
+    assert all_items[0]["elevated_at"] == "2026-05-22T00:30:00Z"  # audit preserved
+
+
+def test_force_delete_node_handles_paired_and_elevated_fks(tmp_db_path: str) -> None:
+    """force_delete_node must null paired_for and tombstone pool_items.elevated_to
+    to avoid FK violations."""
+    storage = Storage.open(tmp_db_path)
+    root = storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T00:00:00Z")
+    storage.insert_session(session_id="ses_1", scope="dpd", label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1",
+                           node_type="start", text="s",
+                           parent_id="r1",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1",
+                           node_type="end", text="e",
+                           parent_id="n_s",
+                           paired_for="n_s",
+                           achievement_conditions="done",
+                           now="2026-05-22T00:00:00Z")
+    # Elevate pool item into End node
+    storage.insert_pool_item(pool_id="pool_x", scope_root_id=root["id"],
+                             text="x", origin_session_id=None,
+                             origin_turn=None, tags=None,
+                             now="2026-05-22T00:00:00Z")
+    storage.mark_pool_elevated(pool_id="pool_x", elevated_to="n_e",
+                               now="2026-05-22T00:30:00Z")
+    # Force delete the End node — should null paired_for + tombstone pool, no FK error
+    storage.force_delete_node(session_id="ses_1", node_id="n_e",
+                              now="2026-05-22T01:00:00Z")
+    # End node is gone
+    assert storage.get_node(session_id="ses_1", node_id="n_e") is None
+    # Pool item is tombstoned, not active
+    actives = storage.list_pool_items(scope_root_id=root["id"], active_only=True)
+    assert actives == []
+    all_items = storage.list_pool_items(scope_root_id=root["id"], active_only=False)
+    assert all_items[0]["dropped_at"] is not None
