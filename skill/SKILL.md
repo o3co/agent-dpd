@@ -1,13 +1,54 @@
 ---
 name: dpd
-description: Bootstrap a DPD (Decompose-Propagate Decision) graph-mode session — structures multi-step decisions, design analyses, or any thread that benefits from explicit decompose/propagate tracking. Invoke when the user runs /dpd, or proactively suggest when a conversation has accumulated several implicit hypotheses/decisions that would benefit from explicit graph tracking. Requires the dpd-mcp-server MCP server to be registered with Claude Code.
+description: Bootstrap a DPD (Decompose-Propagate Decision) session under the ambient overlay paradigm — DPD is a passive graph overlay that observes ongoing conversation and proposes graph updates collaboratively. Invoke when the user runs /dpd, or proactively suggest when a conversation has accumulated multiple open threads, unanchored decision verbs, or surfaced contradictions that would benefit from explicit graph tracking. Requires the dpd-mcp-server MCP server to be registered with Claude Code.
 ---
 
-# DPD: Decompose-Propagate Decision
+# DPD v0.3.1: Decompose-Propagate Decision (Ambient Overlay Paradigm)
 
-Announce: "Using dpd skill to bootstrap a DPD session."
+Announce: "Using dpd skill."
 
-DPD is a graph-based protocol for structuring decision dialogues. Graph state lives in an MCP server (sqlite per agent scope); this skill manages startup UX (resume vs new) and the per-turn graph-mode interaction loop.
+DPD is a graph-based protocol for structuring decision dialogues. Graph state lives in an MCP server (SQLite per agent scope). This skill governs the full operating lifecycle: entry phase, ambient steady-state, end achievement, session resume, and suggestion mode.
+
+---
+
+## What changed in v0.3.1
+
+v0.3.0 was **active mode**: Claude and user consciously issued graph operations together.
+
+v0.3.1 inverts this: **DPD is a passive overlay that observes ongoing conversation and proposes graph updates collaboratively.** User cognitive overhead reduces to two actions:
+
+1. Fire `/dpd` when they sense "this needs organizing" (bottom-up trigger)
+2. Confirm Claude's proposed updates at natural pauses
+
+Everything else — signal detection, attachment evaluation, Pool management, End achievement detection — is Claude's background work.
+
+**Role split:**
+- **Human**: conversation lead, goal setting, final confirmation
+- **Claude (secretary)**: graph bookkeeping, signal detection, Pool management, proposal drafting
+
+Tone cue: Claude's proposals should be custodial — "ここまでを整理させて" — not transactional ("適用?").
+
+---
+
+## Invocation pattern (spec §2)
+
+### Bottom-up trigger (§2.1)
+
+`/dpd` fires when the user senses mid-conversation that things need organizing. There is already conversation context by the time `/dpd` fires. The startup ceremony is therefore conversation-rescue, not session initialization from scratch.
+
+**Empty-context edge case**: If `/dpd` fires at session start with no prior conversation, skip §3.1 summarization. Proceed directly to §3.2 goal confirm → generate a minimum Start/End skeleton → enter ambient mode (§3.5). The skeleton is necessary: without an End anchor, `mark_reached` cannot function.
+
+### Claude-suggested invocation (§2.2)
+
+Claude may volunteer a soft suggestion to fire `/dpd` when it detects conversation tangle:
+
+- Multiple open threads accumulating without resolution
+- Decision verbs ("じゃあ X で行く", "Y はやめる") without a graph anchor
+- Contradictions surface between prior statements
+
+Wording: brief, low-pressure — e.g., "これ /dpd した方が整理しやすいかも". Final decision is always the user's. This mirrors the Entry-phase "propose / user confirm" pattern applied to the trigger itself.
+
+---
 
 ## Prerequisites
 
@@ -19,29 +60,27 @@ The `dpd-mcp-server` package must be installed in the Python env Claude Code use
 pip install -e ./server
 ```
 
-This exposes the `dpd-mcp-server` console script declared in `server/pyproject.toml`.
-
 **2. Register with Claude Code**:
 
 ```bash
 claude mcp add dpd-mcp-server -- dpd-mcp-server
-# alternative: python -m dpd_mcp_server (same effect)
+# alternative: python -m dpd_mcp_server
 # or edit .mcp.json directly
 ```
 
-**3. Restart Claude Code** so the tools become discoverable. If `mcp__dpd-mcp-server__list_sessions` etc. still don't appear, re-verify both steps before continuing.
+**3. Restart Claude Code** so the tools become discoverable. If `mcp__dpd-mcp-server__list_sessions` still doesn't appear, re-verify both steps before continuing.
+
+---
 
 ## Startup sequence (spec §8.3)
 
-### 1. Detect sub-scope
+### Step 1: Detect sub-scope
 
 Resolve in this priority (first match wins):
 
-1. **Explicit `--scope=<name>` argument**: when the user invokes `/dpd --scope=<name>`, use that verbatim. This is the most reliable signal — use it whenever provided.
-2. **cwd walk-up to `scope.yaml`**: from cwd, walk parents looking for `scope.yaml`. Read its declared `name:` field (NOT the directory basename, which may differ).
+1. **Explicit `--scope=<name>` argument**: use verbatim when provided.
+2. **cwd walk-up to `scope.yaml`**: read its `name:` field (not the directory basename).
 3. **Fallback**: sub-scope = null (top-level session).
-
-The override priority matters: when claude is launched from a workspace **above** the sub-scope (e.g., `/Volumes/Workspace/scopes/mcp/` while wanting to work in `decompose-propagate.protocol`), walk-up alone returns null and silently routes the work to top-level. Always check for an explicit `--scope=` first.
 
 ```bash
 # walk-up implementation (only when explicit override absent)
@@ -57,55 +96,255 @@ while [ "$dir" != "/" ]; do
 done
 ```
 
-### 2. List existing sessions
+### Step 2: List existing sessions
 
-Call `list_sessions` with the detected scope (omit `scope` argument entirely for top-level). The server auto-resolves the agent scope from MCP roots — do NOT pass `agent_scope`.
+Call `list_sessions(scope=<sub-scope>, mode_filter=...)` with the detected scope. Omit `scope` argument entirely for top-level. Do NOT pass `agent_scope`.
 
-### 3. Resume vs new (NEVER auto-resume)
+### Step 3: Resume vs new (NEVER auto-resume)
 
-- **0 existing sessions** → call `start_session(scope=<sub-scope>, label=<optional>)`.
-- **1+ existing sessions** → ask the user via `AskUserQuestion`:
-  - (a) Resume most recent (show its label + started_at)
-  - (b) Resume a specific session (show full list)
+- **0 existing sessions** → call `start_session(scope=<sub-scope>, mode='entry')`.
+- **1+ existing sessions** → ask the user:
+  - (a) Resume most recent (show label + started_at + current mode)
+  - (b) Resume a specific session (show full list with modes)
   - (c) Start a new session
 
-Auto-resume is forbidden: it pollutes a stale session with unrelated work.
+Auto-resume is forbidden. It pollutes a stale session with unrelated work.
 
-### 4. On resume — brief the AI with state
+### Step 4: On resume — brief with state and detect mode
 
-Call `get_session_state(session_id=<chosen>)`. Returns `{session, active_roots, focus_node}`. Summarize internally:
+Call `get_session_state(session_id=<chosen>)`. Returns `{session, active_roots, focus_node}`.
+
+Summarize internally:
 
 ```
 sub_scope   = <session.scope or "(top-level)">
 session_id  = <session.id>
 label       = <session.label or "(unlabeled)">
+mode        = <session.mode>   ← null means legacy session
 focus       = <focus_node.text or "(none set)">
-active_roots: [<{id, topic, lifecycle}, ...>]
+active_roots: [{id, topic, lifecycle}, ...]
 ```
 
-### 5. Graph-mode loop
+**Mode-dependent resume behavior:**
 
-Each user turn:
+| `session.mode` | Action |
+|---|---|
+| `entry` | Continue Entry phase — bootstrap was not completed. Resume at §3.2 or wherever user left off. |
+| `ambient` | Propose: "前回 ambient 中だった、復帰しますか?" → user confirm → resume ambient mode (§4). |
+| `idle` | Subgraph completed. Ask: "前回 subgraph は完結済み。新しい /dpd を開始する? 別 root に focus を移す? idle のまま続ける?" |
+| `null` (legacy) | Heuristic: if active_roots > 0 and Pool items exist → suggest ambient resume. Otherwise treat as fresh entry. Always confirm before proceeding (§6.1). |
 
-1. Identify graph operations implied by the user's message.
-2. Issue MCP tool calls (parallel when independent, serial when ordered).
-3. Render a concise summary of the diff (not raw JSON).
+**Resume edge case (§5.1.2):** If `focus_node` points to a subgraph with `state='closed'`, do NOT suggest ambient resume. Instead ask: "前回 subgraph は完結済み。新 entry / idle 継続 / 他 root へ focus 変更、どれ?"
 
-Common idioms:
+### Step 5: Graph-mode loop
 
-- **New topic** → `spawn_root(topic=...)` (returns the full root row, no extra fetch needed)
-- **Child under parent** → `add_node(parent_id, type, text)` (returns the full node row)
-- **Pick from N hypothesis options (atomic)** → `resolve_hypothesis_branch(hyp_id, decision_text, rationale_text?)`. This is the **preferred closure path** for select-from-N decisions: it closes the chosen hypothesis as resolved, siblings as rejected, inserts decision + rationale, **and auto-inserts a `derived_from` edge from the decision to the accepted hypothesis** — all in a single transaction. Replaces the 5+ separate calls of the old close-each-individually pattern.
-- **Mark a single node resolved** → `close_node(node_id, closure_reason)` for cases that aren't a hypothesis selection (e.g., closing an answer / verification / evidence).
-- **Set focus for resume context** → `set_focus(node_id)` after a meaningful turn so the next session resumes pointed at the right place. Pass `node_id=null` to clear focus.
-- **Retire a finished root** → `set_root_lifecycle(root_id, "archived")` once all the discussion under it is closed and you don't want it cluttering `list_active_roots`.
-- **Pick next thing to work on (next_focus)** → `list_open_nodes(root_id=<recency-ranked root>)`, then pick the deepest open node.
-- **Express cross-node relations** → `add_edge(from_node, to_node, type, reason?)` for `requires` / `blocks` / `derived_from` style links that don't fit the parent-child tree.
-- **Inspect** → `get_node` / `walk_subtree` / `list_active_roots` / `list_edges`.
+After session is established or resumed, enter the appropriate operating phase (Entry or Ambient). See §§ below for per-phase behavior.
+
+---
+
+## Entry phase (5 steps per spec §3)
+
+The entry phase bootstraps the graph from existing conversation. Execute in sequence.
+
+### §3.1 Conversation summarization
+
+- Window candidate: all turns since session start.
+- Selection: topic clustering anchored on the `/dpd` invocation turn + immediately prior topic.
+- Report: "session 全 N turn のうち K turn を選んだ" — user may broaden or narrow.
+- Skip this step if invoked at session start with no prior conversation (empty-context edge case, §2.1).
+
+### §3.2 Goal always-confirm (silent assume 禁止)
+
+Interpret `/dpd <argument>` as a **hint**, not a confirmed goal. Two readings exist:
+- α: the argument itself is the goal
+- β: the goal is derived from what the argument implies
+
+Always present a candidate goal and ask explicitly: "こういうゴールで DPD モード開始する、OK?" Do not assume. Do not proceed until user confirms.
+
+### §3.3 Initial graph construction (adaptive fidelity)
+
+Build the graph iteratively, not in one pass. Apply epistemic stratification:
+
+| Tier | Source | When to include |
+|---|---|---|
+| **Grounded** | Direct conversation utterances | Auto-include in initial graph |
+| **Inferred** | Claude's extrapolation beyond conversation | Only with explicit user opt-in |
+
+Flow:
+1. Build grounded graph from conversation material.
+2. Present to user (§3.4 format).
+3. Ask: "推測 node を自動算出しますか?"
+4. If YES: run an inferred pass. Mark each inferred node with `provenance='inferred'` when calling `add_node`.
+
+Confidently classifiable observations → graph nodes. Ambiguous observations → Pool (see §4.2 attachment criterion).
+
+### §3.4 Proposal format: C + minimal B
+
+Primary: **Mermaid graph** (visual + spatial). Accompany with **minimal classification notes** — one line per node/group explaining Claude's categorization decision (e.g., "これは decided として graph 化", "これは open Q").
+
+Rationale: Mermaid alone risks Claude deciding structure too early. Notes alone leave classification work to the user. C + minimal B shows the graph while surfacing the reasoning.
+
+### §3.5 Explicit transition to ambient mode
+
+Wait for user's explicit "OK / これで進めて" before entering ambient mode. Call `set_session_mode(session_id, 'ambient')` on confirmation.
+
+Rationale: The Entry phase final step is the last intentionally active moment. Silent transition is forbidden (same rule as §3.2 goal confirm).
+
+---
+
+## Ambient mode (steady-state per spec §4)
+
+User converses normally. Claude observes and proposes graph updates. This is the primary operating state in v0.3.1.
+
+### §4.1 Detection signals
+
+| Signal | Example triggers | DPD operation |
+|---|---|---|
+| **Decision verb** | 「じゃあ X で行く」「Y はやめる」「Z に切り替える」 | `close_node` / `resolve_hypothesis_branch` |
+| **Hypothesis surface** | 「X かもしれない」「A 案と B 案がある」 | `add_node(type='hypothesis')` × N |
+| **Closure** | Question answered, discussion petered out | `close_node` |
+
+Do NOT use mechanical triggers (turn count, token count). Density mismatch makes them imprecise.
+
+### §4.2 Attachment criterion (Pool vs graph)
+
+For each detected signal, determine where it attaches:
+
+| Attachment | Action |
+|---|---|
+| Confirmed attach within primary focus root | Add to pending update list → propose at next natural pause |
+| Attach falls in another active root | Routing confirmation per §4.3 |
+| Attach undetermined | Add to Pool via `pool_add`. Include a tentative attach hint in the text to reduce future elevate cost. |
+
+Pool semantic is unified across phases:
+- Entry Pool: no End anchor yet → all observations are "attach undetermined"
+- Ambient Pool: End exists but specific update has no clear attach point
+
+### §4.3 Multi-root cross-root detection
+
+Session may have multiple active roots. Attend to one primary focus root. When a signal appears to relate to a different active root:
+
+→ Confirm: "これ root_X 関連かも、振り分ける?" Final routing decision is the user's.
+
+Do not silently route cross-root signals. Do not ignore them either. The hybrid confirmation is the intended pattern.
+
+### §4.4 Natural pause detection
+
+Accumulate pending updates **in-memory** (not persisted — lost on Claude Code restart). Propose at natural pauses. Pause triggers (OR'd):
+
+- **(a) Topic shift** (primary): user's topic visibly transitions.
+- **(c) Count threshold** (safety net): pending update count reaches N (default: ~5 items).
+- **(b) Exchange completion** (opportunistic): only fire when confidence in exchange completion is high.
+
+(a) OR (c) as baseline. (b) as supplemental when confident.
+
+### §4.5 Proposal format at natural pause
+
+Tone: **custodial** — "ここまでを整理させて" — not transactional ("適用?").
+
+Format: **hierarchical list + local subgraph context**. For each pending update, show the target node's local neighborhood (parent K levels + child M levels + siblings, default depth 2). Annotate proposed changes inline.
+
+```text
+ここまでを整理させてください:
+
+root_abc (TBD 4)
+  - hypothesis: H1
+  - hypothesis: H2 ← [→ close as resolved]
+    - rationale: X
+  - hypothesis: H3 ← [→ close as rejected]
+  - (NEW) decision ← 「Y で行く」
+
+これを適用してよいですか?
+```
+
+Rationale: Full Mermaid at every pause is expensive. Numbered lists lose spatial context. Hierarchical list gives both spatial anchoring and text clarity.
+
+### §4.6 User reaction handling
+
+| Reaction | Processing |
+|---|---|
+| Full OK | Apply all pending updates. |
+| Partial reject ("2 番は違う") | Call `pool_reject(pool_id, reason)` for the rejected items. Apply the rest. |
+| Full reject | Call `pool_reject` for all pending items. Continue ambient. |
+| Partial modify + apply | Claude revises → re-presents → confirm loop. |
+
+#### §4.6.1 Reject suppression (signal identity)
+
+Before re-proposing a similar update, check whether an identical signal was already rejected. Identity is defined on two dimensions:
+
+- **Target node id** (for operations on existing nodes): same target + same operation kind → suppress.
+- **Canonical text hash** (for new node additions): `lower(strip(text))` SHA-256 prefix 16 bytes → same hash → suppress.
+
+Suppression check: compare against `pool_list(rejected_only=True)`. If both dimensions match → suppress. Partial match → propose; if user rejects again, record new `pool_reject`.
+
+#### §4.6.2 Pool visibility
+
+| Call | Returns |
+|---|---|
+| `pool_list()` (default `active_only=True`) | Active items only, excludes rejected |
+| `pool_list(include_rejected=True)` | Active + rejected |
+| `pool_list(rejected_only=True)` | Rejected only (for `/dpd-status` "pending rejects" view) |
+
+#### §4.6.3 Unsuppress
+
+User-driven: `/dpd-edit <pool_id>` sets `rejected_at` / `rejected_reason` to NULL. Item returns to "attach undetermined" state and re-enters Claude's evaluation scope.
+
+---
+
+## End achievement (per spec §5)
+
+### §5.1 mark_reached trigger
+
+**Hybrid (a) + (b):**
+
+- **(a) Primary**: Claude evaluates `achievement_conditions` against the current subgraph state (closed/open nodes, decisions, open hypotheses). If satisfied → propose `mark_reached`.
+- **(b) Fallback**: user signals "終わったね" / "完了" / "OK" → propose `mark_reached` even if conditions are not fully evaluated.
+
+Evaluation is LLM inference against natural language conditions. When satisfied → propose + await user confirmation. Do not proactively alert on unsatisfied conditions (ambient overlay philosophy: do not interrupt).
+
+#### §5.1.1 Single end_node scope
+
+Each `mark_reached` proposal targets exactly one `end_node_id`. For sessions with multiple active roots:
+
+- Focus root End → propose normally.
+- Non-focus root End → routing confirm: "root_X の End も到達した可能性、mark_reached を提案しますか?" — independent from focus root proposal.
+- Never batch multiple mark_reached in one proposal. Each requires independent user confirmation.
+
+#### §5.1.2 Resume into closed subgraph
+
+If resuming and `focus_node` points to `state='closed'` subgraph, do NOT suggest ambient resume. Ask: "前回 subgraph は完結済み。新 entry / idle 継続 / 他 root へ focus 変更、どれ?"
+
+On `mark_reached` confirmation: call `set_session_mode(session_id, 'idle')` after Pool disposition is complete (§5.2).
+
+### §5.2 Pool disposition on mark_reached
+
+**Ask the user — never auto-drop.** Present three options for each remaining Pool item:
+
+| Option | Processing |
+|---|---|
+| **(i) 漏れ** (should have been in graph) | `pool_elevate` → if subgraph is archived, create `supersedes` subgraph (never reactivate archived). |
+| **(ii) 不要** (surplus discussion) | `pool_drop(pool_id, reason)` |
+| **(iii) 次 DPD 話題** | Carry forward — note for next session or new root. |
+
+The supersedes path for option (i) preserves state machine monotonicity (`active → archived` is forward-only; no `archived → active` re-open in v0.3.1).
+
+---
+
+## Edge cases
+
+**Empty-context invocation (§2.1):**
+1. Interpret `/dpd <argument>` as goal hint → present candidate → confirm (§3.2 flow).
+2. On goal confirmed: `spawn_root` → `add_node(type='start')` + `add_node(type='end', paired_for=start_id, achievement_conditions=<goal text>)`.
+3. Call `set_session_mode(session_id, 'ambient')` on §3.5 explicit OK.
+4. Subsequent signals: all Pool direct, or as children of the skeleton depending on §4.2 attachment criterion.
+
+**Cross-root mark_reached (§5.1.1):** See above — each End requires independent proposal and confirmation.
+
+---
 
 ## Node type vocabulary (spec §2.2)
 
-The server enforces these via CHECK constraint. Pick the type that best fits the rhetorical role:
+The server enforces these via CHECK constraint:
 
 | Side | Examples |
 |---|---|
@@ -113,77 +352,99 @@ The server enforces these via CHECK constraint. Pick the type that best fits the
 | **Solution (close-flavor)** | `answer`, `action`, `verification`, `decision`, `resolution` |
 | **Support** | `evidence`, `constraint`, `assumption`, `rationale`, `risk` |
 
+Special structural types: `start`, `end` (subgraph anchors).
+
 `closure_reason` is one of `resolved` / `rejected` / `invalidated`. Per-type intent:
 
 | Type group | `resolved` | `rejected` | `invalidated` |
 |---|---|---|---|
 | `hypothesis` | adopted as decision | ruled out (sibling of accepted) | later found incoherent |
 | `decision` / `answer` / `resolution` | final | (rarely applicable) | revoked / superseded |
-| `question` / `plan` / `goal` / `problem` | the open thread is closed (answered / done) | abandoned without answer | the question itself was malformed |
+| `question` / `plan` / `goal` / `problem` | closed (answered / done) | abandoned without answer | question itself was malformed |
 | `evidence` / `rationale` / `constraint` / `assumption` | articulated and stands | (rarely applicable) | later found incorrect |
 | `verification` / `action` | done | abandoned | later invalidated by new info |
 | `risk` | mitigated / accepted | rejected (no longer a risk) | re-evaluated as different risk |
 
-The `resolve_hypothesis_branch` tool encodes the most common closure pattern: target = `resolved`, siblings = `rejected`. Use `close_node` for everything else.
+`resolve_hypothesis_branch` encodes the most common closure: target = `resolved`, siblings = `rejected`. Use `close_node` for everything else.
+
+---
 
 ## Tool reference (`dpd-mcp-server`)
 
+Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
+
 | Tool | Purpose |
 |---|---|
-| `start_session(scope?, label?)` | Begin new session, returns `session_id` |
-| `list_sessions(scope?)` | List sessions for sub-scope (most recent first) |
-| `get_session_state(session_id)` | Session + active_roots + focus_node |
-| `spawn_root(session_id, topic, reason?)` | Create new root topic → `{root: {...}}` (full row) |
-| `add_node(session_id, parent_id, type, text, paired_for?, achievement_conditions?)` | Add child node under root or node → `{node: {...}}` (full row). `type` includes `start`/`end` in addition to vocab below. End nodes require `paired_for=<start_node_id>`; `achievement_conditions` is optional for both. |
-| `close_node(session_id, node_id, closure_reason)` | Mark resolved/rejected/invalidated |
-| `resolve_hypothesis_branch(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + auto-insert `derived_from` edge (decision → accepted hypothesis) + insert rationale (if any) |
-| `resolve_branch(session_id, parent_id, parent_kind, results, decision_text?, rationale_text?, derived_from_node_ids?)` | Atomically close N sibling nodes with per-node closure_reason, optionally adding decision + rationale + provenance edges. Generic counterpart to `resolve_hypothesis_branch` (which is locked to select-1-of-N) |
-| `set_focus(session_id, node_id?)` | Set/clear `focus_node_id`. `node_id` may be a regular node or a root_id. Pass `node_id=null` to clear. |
-| `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred` |
-| `list_open_nodes(session_id, root_id?, state?)` | Open nodes in session (or within one root's subtree). `state` filter narrows by node state string. |
-| `add_edge(session_id, from_node, to_node, type, reason?)` | Insert a free-form-typed edge between nodes |
-| `list_edges(session_id, from_node?, to_node?, type?)` | List edges (optional from/to/type filters, AND'd) |
-| `list_unblocked_open_nodes(session_id, root_id?, blocker_edge_type?)` | Open nodes that no open node is blocking via the given edge type (default 'blocks') |
-| `export_mermaid(session_id, root_id?)` | Render as Mermaid `graph TD` text (paste in markdown) |
-| `export_yaml(session_id, root_id?)` | JSON-formatted YAML dump (json.loads round-trippable) |
-| `get_node(session_id, node_id)` | Fetch single node |
-| `walk_subtree(session_id, root_id)` | All descendants of root (pre-order) |
-| `list_active_roots(session_id)` | Roots with lifecycle=active |
-| `pool_add(text, scope?, tags?, origin_session_id?)` | Append raw thought to scope's Pool (auto-creates scope_root if needed) |
-| `pool_list(active_only?=true, scope?)` | List Pool items for scope |
-| `pool_elevate(pool_id, target_end_node_id, type, session_id, text?, scope?)` | Elevate Pool item to DPD subgraph as child of End node |
-| `pool_drop(pool_id, reason?, scope?)` | Mark Pool item dropped |
-| `mark_reached(session_id, end_node_id)` | Signal End achievement → server verifies Start→End connectivity and transitions subgraph to closed |
-| `dump_persist(session_id, start_node_id, destination?)` | Record externalization of a closed subgraph → transitions to deletable |
-| `delete(session_id, start_node_id)` | Physical delete of a deletable subgraph |
-| `force_delete(session_id, node_id)` | Single-node force delete (emergency use only) |
+| `start_session(scope?, label?, mode?)` | Begin new session. **[v0.3.1]** `mode` defaults to `'entry'`. Returns `session_id`. |
+| `list_sessions(scope?, mode_filter?)` | List sessions for sub-scope, most recent first. **[v0.3.1]** `mode_filter` narrows by session.mode (`'entry'`/`'ambient'`/`'idle'`). |
+| `get_session_state(session_id)` | Session + active_roots + focus_node. |
+| `set_session_mode(session_id, mode)` | **[v0.3.1]** Transition session.mode per §9.1.1 table. Valid modes: `'entry'`, `'ambient'`, `'idle'`. Call on §3.5 OK (→ ambient), §5 completion (→ idle), resume into idle. |
+| `spawn_root(session_id, topic, reason?)` | Create new root topic → `{root: {...}}` (full row). |
+| `add_node(session_id, parent_id, type, text, paired_for?, achievement_conditions?, provenance?, state?)` | Add child node. **[v0.3.1]** `provenance` ∈ `'grounded'`/`'inferred'`/`'imported'`/`'manual'` (default `'grounded'`). `state` allows `'archived'` for `/dpd-import` use. End nodes require `paired_for=<start_node_id>`. |
+| `close_node(session_id, node_id, closure_reason)` | Mark resolved / rejected / invalidated. |
+| `resolve_hypothesis_branch(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + auto-insert `derived_from` edge (decision → accepted hypothesis) + insert rationale if any. |
+| `resolve_branch(session_id, parent_id, parent_kind, results, decision_text?, rationale_text?, derived_from_node_ids?)` | Atomically close N sibling nodes with per-node closure_reason. Generic counterpart to `resolve_hypothesis_branch`. |
+| `set_focus(session_id, node_id?)` | Set/clear `focus_node_id`. Pass `node_id=null` to clear. Accepts regular node id or root_id. |
+| `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred`. |
+| `list_open_nodes(session_id, root_id?, state?)` | Open nodes in session or within one root. `state` filter narrows by node state string. |
+| `list_unblocked_open_nodes(session_id, root_id?, blocker_edge_type?)` | Open nodes that no open node is blocking via the given edge type (default `'blocks'`). |
+| `add_edge(session_id, from_node, to_node, type, reason?)` | Insert a free-form-typed edge between nodes. |
+| `list_edges(session_id, from_node?, to_node?, type?)` | List edges with optional filters (AND'd). |
+| `export_mermaid(session_id, root_id?)` | Render as Mermaid `graph TD` text. |
+| `export_yaml(session_id, root_id?)` | JSON-formatted YAML dump (json.loads round-trippable). |
+| `get_node(session_id, node_id)` | Fetch single node. |
+| `walk_subtree(session_id, root_id)` | All descendants of root (pre-order). |
+| `list_active_roots(session_id)` | Roots with lifecycle=active. |
+| `pool_add(text, scope?, tags?, origin_session_id?)` | Append raw thought to scope's Pool. Auto-creates scope_root if needed. |
+| `pool_list(active_only?=true, scope?, include_rejected?, rejected_only?)` | List Pool items. **[v0.3.1]** `include_rejected=True` returns active + rejected. `rejected_only=True` returns rejected only. Default excludes rejected. |
+| `pool_elevate(pool_id, target_end_node_id, type, session_id, text?, scope?)` | Elevate Pool item to DPD subgraph as child of End node. |
+| `pool_drop(pool_id, reason?, scope?)` | Mark Pool item as dropped (physical capture drop). |
+| `pool_reject(pool_id, reason?)` | **[v0.3.1]** Soft-suppress a Pool item: sets `rejected_at` + `rejected_reason`. Distinct from `pool_drop` — item remains for audit and unsuppress. Use when user rejects a proposed update. |
+| `mark_reached(session_id, end_node_id)` | Signal End achievement. Server verifies Start→End connectivity and transitions subgraph to closed. |
+| `dump_persist(session_id, start_node_id, destination?)` | Record externalization of a closed subgraph → transitions to deletable. |
+| `delete(session_id, start_node_id)` | Physical delete of a deletable subgraph. |
+| `force_delete(session_id, node_id)` | Single-node force delete (emergency only). |
+| `bulk_import_subgraph(session_id, root_id, nodes, edges, provenance?, state?)` | **[v0.3.1]** Atomic batch insert of multiple nodes + edges with provenance/state. `provenance` defaults to `'imported'`, `state` defaults to `'archived'`. Used by `/dpd-import`. |
+
+**Session mode transition table (§9.1.1):**
+
+| From mode | Event | To mode |
+|---|---|---|
+| (new) | `start_session` called | `entry` |
+| `entry` | User explicit OK (§3.5) → `set_session_mode` | `ambient` |
+| `entry` | User aborts (`/dpd-abort` etc.) | `idle` |
+| `ambient` | `mark_reached` + Pool disposition complete | `idle` |
+| `ambient` | User explicit abandon | `idle` |
+| `idle` | New `/dpd` invocation | `entry` |
+| `null` (legacy) | `/dpd` resume | `entry` or `ambient` (heuristic, see §6.1) |
+
+---
 
 ## Edge type vocabulary
 
-Documented edge types and their direction conventions:
-
 | Type | Direction (from → to) | Use |
-| --- | --- | --- |
-| `derived_from` | derived → source | Decision/evidence is derived from earlier node (e.g., `decision → hypothesis`, `new_finding → origin_decision`) |
+|---|---|---|
+| `derived_from` | derived → source | Decision/evidence derived from earlier node (e.g., `decision → hypothesis`) |
 | `supports` | supporter → supported | Evidence supports a decision/hypothesis |
 | `contradicts` | contradictor → contradicted | Observation contradicts a decision/hypothesis |
-| `qualifies` | qualifier → qualified | Finding limits or scopes a target decision without overturning it |
-| `invalidates` | invalidator → invalidated | Finding shows a target decision's premise no longer holds |
-| `blocks` | blocker → blocked | Dependency: blocker must close before blocked can be addressed |
-| `contributes_to` | contributor → End | Explicit semantic justification anchor for an End node (optional; see spec §3) |
-| `supersedes` | new → old | New subgraph supersedes an older one (monotonic forward-only state machine) |
+| `qualifies` | qualifier → qualified | Finding limits or scopes a target without overturning it |
+| `invalidates` | invalidator → invalidated | Finding shows target's premise no longer holds |
+| `blocks` | blocker → blocked | Dependency: blocker must close before blocked can proceed |
+| `contributes_to` | contributor → End | Explicit semantic justification anchor for an End node |
+| `supersedes` | new → old | New subgraph supersedes an older one (monotonic forward-only) |
 
-**Direction rule**: from-side is the "active" side (supporting, contradicting, qualifying, deriving); to-side is the target. This matches `storage.py:457-463` for `derived_from` (`from=decision, to=hypothesis`).
+**Direction rule**: from-side is the "active" side (supporting, contradicting, deriving); to-side is the target.
+
+---
 
 ## Cross-TBD post-hoc evidence (canonical form)
 
-When working under one root reveals a finding that strengthens, qualifies, or undermines a decision already made in a different root, record the finding using this canonical form.
+When working under one root reveals a finding that strengthens, qualifies, or undermines a decision in a different root:
 
 **Step 1 — Decide node-or-edge-only**
 
 Ask: "Could this finding later be refined, extended, or objected to?"
-
-- **YES** → make a node (Step 2 onward)
+- **YES** → make a node (Steps 2–4)
 - **NO** → 1 edge only: `add_edge(from=origin_decision, to=target_decision, type=qualifies|invalidates|supports|contradicts)`. Done.
 
 **Step 2 — Add the evidence node under the target root**
@@ -191,8 +452,8 @@ Ask: "Could this finding later be refined, extended, or objected to?"
 ```text
 add_node(
   session_id,
-  parent_id = <target_root_id>,           # target root (physical proximity)
-  type      = "evidence",                 # or "rationale" when appropriate
+  parent_id = <target_root_id>,
+  type      = "evidence",  # or "rationale" when appropriate
   text      = "<finding> (Discovered in <origin_root> during <origin_node>)"
 )
 → new_node_id
@@ -201,57 +462,62 @@ add_node(
 **Step 3 — Valence edge to the target decision**
 
 ```text
-add_edge(
-  session_id,
-  from = new_node_id,
-  to   = <target_decision_id>,
-  type = qualifies | invalidates | supports | contradicts,
-  reason = "<short label>"
-)
+add_edge(session_id, from=new_node_id, to=<target_decision_id>,
+         type=qualifies|invalidates|supports|contradicts, reason="<short label>")
 ```
 
-**Step 4 — Provenance edge from new node to the origin decision**
+**Step 4 — Provenance edge from new node to origin decision**
 
 ```text
-add_edge(
-  session_id,
-  from = new_node_id,                     # the derived finding
-  to   = <origin_decision_id>,            # the source it was derived from
-  type = "derived_from",
-  reason = "post-hoc finding from <origin_root>"
-)
+add_edge(session_id, from=new_node_id, to=<origin_decision_id>,
+         type="derived_from", reason="post-hoc finding from <origin_root>")
 ```
 
-To later trace where a finding came from:
+To trace provenance: `list_edges(session_id, from_node=<new_node_id>, type="derived_from")`
 
-```text
-list_edges(session_id, from_node=<new_node_id>, type="derived_from")
+To find all contradicting findings: `list_edges(session_id, type="contradicts")`
+
+---
+
+## v0.3.1 lifecycle recap (Pool → DPD → state machine)
+
+DPD uses a 2-phase model: free-thinking is staged in **Pool** (`pool_add`), then elevated to the DPD subgraph (`pool_elevate`) once a goal (End) is clear.
+
+Each subgraph has a **Start** (entry point) and **End** (goal anchor, `paired_for`-linked to Start). State machine is monotonic forward-only:
+
+```
+active → archived → closed → deletable → gone
 ```
 
-## Searching dissenting evidence
+Use `mark_reached(end_node_id)` to signal End achievement (server verifies Start→End connectivity). Use `dump_persist` to record externalization. Use `delete` to physically remove.
 
-To find all contradicting findings in the session:
+Pool also serves as the **reject suppression source** in v0.3.1: `pool_reject` marks items with `rejected_at` + `rejected_reason`. These are excluded from default `pool_list` but visible via `include_rejected` / `rejected_only`.
 
-```text
-list_edges(session_id, type="contradicts")
-```
-
-Combine with `to_node=<decision_id>` to find dissent against a specific decision.
-
-## v0.3 lifecycle (Pool → DPD → state machine)
-
-DPD v0.3 introduces a 2-phase model: AI free-thinking output is staged in **Pool**
-(`pool_add`), then elevated to the DPD subgraph (`pool_elevate`) once a goal (End)
-becomes clear. Each subgraph has a **Start** (entry point) and **End** (goal anchor,
-`paired_for`-linked to Start). The state machine is monotonic forward-only:
-`active → archived → closed → deletable → gone`. Use `mark_reached(end_node_id)` to
-signal End achievement (server verifies Start→End connectivity), `dump_persist` to
-record externalization, `delete` to physically remove. The `contributes_to` and
-`supersedes` edges express semantic relationships not captured by parent_id alone.
-
-Full per-turn judgment prompts (Pool elevate decisions, End surface, tangent catch)
-are deferred to v0.3.1. See `docs/dpd-v0.3-draft.md` §§3-5 for the full spec.
+---
 
 ## Tone
 
-Graph mode is a structural overlay on the conversation. Keep responses tight: after each tool call, give the user a one-line `<verb> <node-id>: <short text>` rather than narrating. The structure is the value, not the prose.
+Graph mode is a structural overlay on conversation. Responses should be tight.
+
+After each tool call: one-line `<verb> <node-id>: <short text>` summary, not narration.
+
+At natural pauses: custodial tone — "ここまでを整理させてください" — followed by hierarchical list proposal. Not transactional, not verbose.
+
+The structure is the value. Keep prose minimal.
+
+---
+
+## Related sub-skills (Phase 4)
+
+These skills are planned for Phase 4 and will each have their own SKILL.md:
+
+| Skill | Role |
+|---|---|
+| `/dpd-import` | Parse external prose/spec/graph → hypothetical archived DPD subgraph (uses `bulk_import_subgraph`, provenance=`'imported'`, state=`'archived'`) |
+| `/dpd-fill` | Generate inferred nodes + detect missing arguments / gaps (uses `add_node` with provenance=`'inferred'`). Invoke `/fcot` when verifying inferred nodes. |
+| `/dpd-status` | Current graph + Pool + pending updates view (uses `pool_list(include_rejected=True)` for full visibility) |
+| `/dpd-dump` | Full graph tree textual dump (wraps `export_yaml` / `export_mermaid`) |
+| `/dpd-summary-md` | Export decided/closed items as markdown summary |
+| `/dpd-edit <node\|pool_id>` | Manual node/pool mutation. Also used for unsuppress: clear `rejected_at` / `rejected_reason` on a pool item. |
+
+**`/fcot` orchestration**: `/dpd-fill` and `/dpd-import` SKILL.md prompts should instruct Claude to invoke `/fcot` when verifying inferred or imported nodes. No code-level integration needed — the skill prompt instruction is sufficient.
