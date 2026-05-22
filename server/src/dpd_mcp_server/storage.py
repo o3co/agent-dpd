@@ -941,3 +941,208 @@ class Storage:
                 "WHERE id = ?",
                 (now, f"dropped:{reason}" if reason else "dropped", pool_id),
             )
+
+    # ------------------------------------------------------------------
+    # v0.3 node insert + state machine
+    # ------------------------------------------------------------------
+
+    def insert_node_v3(
+        self,
+        *,
+        node_id: str,
+        session_id: str,
+        node_type: str,
+        text: str,
+        parent_id: str,
+        parent_kind: str,
+        paired_for: str | None,
+        achievement_conditions: str | None,
+        now: str,
+    ) -> None:
+        """v3 node insert: supports paired_for + achievement_conditions + state=active.
+
+        End nodes must specify paired_for (= the Start node they terminate).
+        """
+        if node_type == "end" and not paired_for:
+            raise ValueError("End nodes require paired_for (= paired Start id)")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO nodes
+                    (id, session_id, type, text, status, closure_reason,
+                     parent_id, parent_kind,
+                     paired_for, achievement_conditions,
+                     achievement_conditions_satisfied, state,
+                     archived_at, closed_at, deletable_at,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?, 0, 'active',
+                        NULL, NULL, NULL, ?, ?)
+                """,
+                (node_id, session_id, node_type, text,
+                 parent_id, parent_kind,
+                 paired_for, achievement_conditions,
+                 now, now),
+            )
+            self._touch_session(conn, session_id=session_id, now=now)
+
+    def _reachable_from_start(
+        self, conn: sqlite3.Connection, *, session_id: str,
+        start_id: str, target_id: str,
+    ) -> bool:
+        """Walk parent_id chain from target up to root; return True if start_id encountered."""
+        cur = target_id
+        seen: set[str] = set()
+        while cur and cur not in seen:
+            if cur == start_id:
+                return True
+            seen.add(cur)
+            row = conn.execute(
+                "SELECT parent_id, parent_kind FROM nodes "
+                "WHERE session_id = ? AND id = ?",
+                (session_id, cur),
+            ).fetchone()
+            if row is None:
+                return False
+            if row["parent_kind"] == "root":
+                return False
+            cur = row["parent_id"]
+        return False
+
+    def mark_reached(
+        self, *, session_id: str, end_node_id: str, now: str
+    ) -> None:
+        """Mark End node as reached. Verify Start→End connectivity, then
+        transition entire subgraph to archived → closed (forward-only)."""
+        with self.connect() as conn:
+            end = conn.execute(
+                "SELECT * FROM nodes WHERE session_id = ? AND id = ?",
+                (session_id, end_node_id),
+            ).fetchone()
+            if end is None:
+                raise ValueError(f"end_node_id {end_node_id!r} not found")
+            if end["type"] != "end":
+                raise ValueError(f"node {end_node_id!r} is not type=end")
+            if end["paired_for"] is None:
+                raise ValueError(f"end node {end_node_id!r} has no paired_for")
+            start_id = end["paired_for"]
+            if not self._reachable_from_start(
+                conn, session_id=session_id,
+                start_id=start_id, target_id=end_node_id,
+            ):
+                raise ValueError(
+                    f"end node {end_node_id!r} not reachable from "
+                    f"paired start {start_id!r}"
+                )
+            # Collect all nodes in the subgraph (start + descendants via parent_id forward walk).
+            subgraph_ids = self._subgraph_node_ids(
+                conn, session_id=session_id, start_id=start_id
+            )
+            # Mark end's achievement, then archive+close every active member.
+            conn.execute(
+                "UPDATE nodes SET achievement_conditions_satisfied = 1 "
+                "WHERE session_id = ? AND id = ?",
+                (session_id, end_node_id),
+            )
+            placeholders = ",".join("?" * len(subgraph_ids))
+            conn.execute(
+                f"""
+                UPDATE nodes
+                SET state = 'closed',
+                    archived_at = COALESCE(archived_at, ?),
+                    closed_at = COALESCE(closed_at, ?),
+                    updated_at = ?
+                WHERE session_id = ? AND id IN ({placeholders})
+                  AND state = 'active'
+                """,
+                (now, now, now, session_id, *subgraph_ids),
+            )
+            self._touch_session(conn, session_id=session_id, now=now)
+
+    def _subgraph_node_ids(
+        self, conn: sqlite3.Connection, *, session_id: str, start_id: str,
+    ) -> list[str]:
+        """Return start_id + all descendants reachable via parent_id (forward)."""
+        members = [start_id]
+        frontier = [start_id]
+        while frontier:
+            next_frontier = []
+            for parent in frontier:
+                children = conn.execute(
+                    "SELECT id FROM nodes WHERE session_id = ? AND parent_id = ?",
+                    (session_id, parent),
+                ).fetchall()
+                for c in children:
+                    if c["id"] not in members:
+                        members.append(c["id"])
+                        next_frontier.append(c["id"])
+            frontier = next_frontier
+        return members
+
+    def dump_persist_subgraph(
+        self, *, session_id: str, start_node_id: str,
+        destination: str | None, now: str,
+    ) -> None:
+        """closed → deletable for the subgraph rooted at start_node_id.
+
+        `destination` is recorded but the actual file write is the caller's concern;
+        storage layer only flips state.
+        """
+        with self.connect() as conn:
+            members = self._subgraph_node_ids(
+                conn, session_id=session_id, start_id=start_node_id
+            )
+            placeholders = ",".join("?" * len(members))
+            conn.execute(
+                f"""
+                UPDATE nodes
+                SET state = 'deletable',
+                    deletable_at = COALESCE(deletable_at, ?),
+                    updated_at = ?
+                WHERE session_id = ? AND id IN ({placeholders})
+                  AND state = 'closed'
+                """,
+                (now, now, session_id, *members),
+            )
+            self._touch_session(conn, session_id=session_id, now=now)
+
+    def delete_subgraph(
+        self, *, session_id: str, start_node_id: str, now: str,
+    ) -> None:
+        """Physical delete for a subgraph in `deletable` state.
+
+        Cleans up edges that reference any node in the subgraph (from either side).
+        """
+        with self.connect() as conn:
+            members = self._subgraph_node_ids(
+                conn, session_id=session_id, start_id=start_node_id
+            )
+            placeholders = ",".join("?" * len(members))
+            conn.execute(
+                f"""
+                DELETE FROM edges
+                WHERE session_id = ?
+                  AND (from_node IN ({placeholders}) OR to_node IN ({placeholders}))
+                """,
+                (session_id, *members, *members),
+            )
+            conn.execute(
+                f"DELETE FROM nodes WHERE session_id = ? AND id IN ({placeholders})",
+                (session_id, *members),
+            )
+            self._touch_session(conn, session_id=session_id, now=now)
+
+    def force_delete_node(
+        self, *, session_id: str, node_id: str, now: str,
+    ) -> None:
+        """Physical delete a single node regardless of state. Cleans referencing edges."""
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM edges WHERE session_id = ? "
+                "AND (from_node = ? OR to_node = ?)",
+                (session_id, node_id, node_id),
+            )
+            conn.execute(
+                "DELETE FROM nodes WHERE session_id = ? AND id = ?",
+                (session_id, node_id),
+            )
+            self._touch_session(conn, session_id=session_id, now=now)

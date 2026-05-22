@@ -1846,3 +1846,149 @@ def test_pool_drop_marks_dropped_at(tmp_db_path: str) -> None:
                            now="2026-05-22T02:00:00Z")
     actives = storage.list_pool_items(scope_root_id=root["id"], active_only=True)
     assert actives == []
+
+
+def test_insert_start_node_with_paired_for_unset(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(
+        node_id="n_start", session_id="ses_1", node_type="start",
+        text="Start of subgraph", parent_id="r1", parent_kind="root",
+        paired_for=None, achievement_conditions=None,
+        now="2026-05-22T00:00:00Z",
+    )
+    node = storage.get_node(session_id="ses_1", node_id="n_start")
+    assert node["type"] == "start"
+    assert node["state"] == "active"
+    assert node["paired_for"] is None
+
+
+def test_insert_end_node_requires_paired_for(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(
+        node_id="n_start", session_id="ses_1", node_type="start",
+        text="s", parent_id="r1", parent_kind="root",
+        paired_for=None, achievement_conditions=None,
+        now="2026-05-22T00:00:00Z",
+    )
+    import pytest
+    with pytest.raises(ValueError, match="paired_for"):
+        storage.insert_node_v3(
+            node_id="n_end", session_id="ses_1", node_type="end",
+            text="e", parent_id="n_start", parent_kind="node",
+            paired_for=None,  # MISSING — must raise
+            achievement_conditions="done when X",
+            now="2026-05-22T00:00:00Z",
+        )
+
+
+def test_mark_reached_transitions_subgraph_to_closed(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    # Subgraph: r1 → start → middle → end
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
+                           text="s", parent_id="r1", parent_kind="root",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_m", session_id="ses_1", node_type="question",
+                           text="m", parent_id="n_s", parent_kind="node",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
+                           text="e", parent_id="n_m", parent_kind="node",
+                           paired_for="n_s",
+                           achievement_conditions="done when X",
+                           now="2026-05-22T00:00:00Z")
+    storage.mark_reached(session_id="ses_1", end_node_id="n_e",
+                         now="2026-05-22T01:00:00Z")
+    for nid in ("n_s", "n_m", "n_e"):
+        node = storage.get_node(session_id="ses_1", node_id=nid)
+        assert node["state"] == "closed", f"{nid} not closed"
+    end = storage.get_node(session_id="ses_1", node_id="n_e")
+    assert end["achievement_conditions_satisfied"] == 1
+    assert end["archived_at"] is not None
+    assert end["closed_at"] is not None
+
+
+def test_mark_reached_rejects_unreachable_end(tmp_db_path: str) -> None:
+    """End must be reachable from its paired Start via parent_id chain."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
+                           text="s", parent_id="r1", parent_kind="root",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    # End is NOT under start (parented to root instead)
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
+                           text="e", parent_id="r1", parent_kind="root",
+                           paired_for="n_s",
+                           achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    import pytest
+    with pytest.raises(ValueError, match="not reachable"):
+        storage.mark_reached(session_id="ses_1", end_node_id="n_e",
+                             now="2026-05-22T01:00:00Z")
+
+
+def test_dump_persist_transitions_closed_to_deletable(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
+                           text="s", parent_id="r1", parent_kind="root",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
+                           text="e", parent_id="n_s", parent_kind="node",
+                           paired_for="n_s",
+                           achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.mark_reached(session_id="ses_1", end_node_id="n_e",
+                         now="2026-05-22T01:00:00Z")
+    storage.dump_persist_subgraph(session_id="ses_1", start_node_id="n_s",
+                                  destination="/tmp/dump.md",
+                                  now="2026-05-22T02:00:00Z")
+    for nid in ("n_s", "n_e"):
+        node = storage.get_node(session_id="ses_1", node_id=nid)
+        assert node["state"] == "deletable"
+
+
+def test_delete_subgraph_removes_nodes_and_edges(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
+                           text="s", parent_id="r1", parent_kind="root",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
+                           text="e", parent_id="n_s", parent_kind="node",
+                           paired_for="n_s",
+                           achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.mark_reached(session_id="ses_1", end_node_id="n_e",
+                         now="2026-05-22T01:00:00Z")
+    storage.dump_persist_subgraph(session_id="ses_1", start_node_id="n_s",
+                                  destination=None,
+                                  now="2026-05-22T02:00:00Z")
+    storage.delete_subgraph(session_id="ses_1", start_node_id="n_s",
+                            now="2026-05-22T03:00:00Z")
+    assert storage.get_node(session_id="ses_1", node_id="n_s") is None
+    assert storage.get_node(session_id="ses_1", node_id="n_e") is None
