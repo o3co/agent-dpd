@@ -82,6 +82,8 @@ Resolve in this priority (first match wins):
 2. **cwd walk-up to `scope.yaml`**: read its `name:` field (not the directory basename).
 3. **Fallback**: sub-scope = null (top-level session).
 
+**Note (override priority matters)**: when Claude is launched from a workspace *above* the intended sub-scope (e.g., `/Volumes/Workspace/scopes/mcp/` while wanting to work in `decompose-propagate.protocol`), walk-up alone returns null and silently routes work to top-level. Always pass `--scope=<name>` explicitly in this case.
+
 ```bash
 # walk-up implementation (only when explicit override absent)
 dir="$(pwd)"
@@ -270,12 +272,13 @@ Rationale: Full Mermaid at every pause is expensive. Numbered lists lose spatial
 
 #### §4.6.1 Reject suppression (signal identity)
 
-Before re-proposing a similar update, check whether an identical signal was already rejected. Identity is defined on two dimensions:
+Before re-proposing a similar update, check whether an identical signal was already rejected. Identity is defined on **three dimensions** (per spec §4.6.1):
 
-- **Target node id** (for operations on existing nodes): same target + same operation kind → suppress.
-- **Canonical text hash** (for new node additions): `lower(strip(text))` SHA-256 prefix 16 bytes → same hash → suppress.
+- **Target node id** (for operations on existing nodes)
+- **Canonical text hash** (for new node additions): `lower(strip(text))` SHA-256 prefix 16 hex chars
+- **Operation kind** (`close_node` / `add_node` / `add_edge` etc.) — same target but different operation is NOT a duplicate
 
-Suppression check: compare against `pool_list(rejected_only=True)`. If both dimensions match → suppress. Partial match → propose; if user rejects again, record new `pool_reject`.
+Suppression check: compare against `pool_list(rejected_only=True)`. All three dimensions must match for auto-suppress. Partial match → propose; if user rejects again, record new `pool_reject`.
 
 #### §4.6.2 Pool visibility
 
