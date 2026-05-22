@@ -1,4 +1,4 @@
-"""MCP server wiring: register the 29 DPD tools over stdio."""
+"""MCP server wiring: register the 30 DPD tools over stdio."""
 
 from __future__ import annotations
 
@@ -773,6 +773,33 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="set_session_mode",
+            title="Set session mode",
+            description=(
+                "Transition session mode per the v0.3.1 lifecycle: "
+                "entry → ambient → idle → entry. "
+                "Validates the transition against the allowed table (§9.1.1). "
+                "Raises if the transition is disallowed (e.g. ambient → entry, "
+                "idle → ambient). Self-transitions are idempotent."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "mode"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["entry", "ambient", "idle"],
+                        "description": "Target mode. Must be entry, ambient, or idle.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
     ]
     by_name = {t.name: t for t in tools}
     for old, new in LEGACY_ALIASES.items():
@@ -885,6 +912,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         )
     if name == "pool_reject":
         return tools.pool_reject(storage, arguments=tool_args, now=now)
+    if name == "set_session_mode":
+        return tools.set_session_mode(
+            storage=storage, arguments=tool_args, now=now
+        )
 
     raise ValueError(f"unknown tool: {name}")
 

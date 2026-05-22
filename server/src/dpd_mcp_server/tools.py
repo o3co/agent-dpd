@@ -833,6 +833,26 @@ def force_delete(
     return {"node_id": node_id_, "force_deleted_at": now}
 
 
+def set_session_mode(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Transition session mode per the v0.3.1 lifecycle table (§9.1.1).
+
+    Validates the transition against the allowed table and raises ValueError
+    for disallowed moves (e.g. ambient → entry, idle → ambient).
+    Self-transitions are idempotent.
+    """
+    session_id = _required(arguments, "session_id")
+    mode = _required(arguments, "mode")
+    updated_session = storage.set_session_mode(
+        session_id=session_id, mode=mode, now=now
+    )
+    return {"session": updated_session}
+
+
 def _required(arguments: dict[str, Any], key: str) -> Any:
     value = arguments.get(key)
     if value is None or value == "":

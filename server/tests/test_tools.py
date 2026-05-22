@@ -1825,3 +1825,180 @@ def test_pool_reject_does_not_affect_dropped_at(tmp_db_path):
                                       now="2026-05-22T01:00:00Z")
     # After rejection, dropped_at must still be NULL.
     assert reject_result["pool_item"]["dropped_at"] is None
+
+
+# ---------------------------------------------------------------------------
+# Task 6 (v0.3.1): set_session_mode — transition table validation
+# ---------------------------------------------------------------------------
+
+
+def _new_session(storage: Storage, mode: str | None = "entry") -> str:
+    """Helper: insert a session with the given mode; returns session_id."""
+    import sqlite3 as _sqlite3
+    sid = f"ses_t_{mode or 'null'}"
+    storage.insert_session(
+        session_id=sid, scope=None, label=None,
+        now="2026-05-22T00:00:00Z",
+        mode=mode if mode is not None else "entry",
+    )
+    if mode is None:
+        # Simulate legacy NULL mode by patching directly.
+        with _sqlite3.connect(storage._db_path) as conn:
+            conn.execute("UPDATE sessions SET mode = NULL WHERE id = ?", (sid,))
+    return sid
+
+
+def test_set_session_mode_entry_to_ambient_ok(tmp_db_path: str) -> None:
+    """entry → ambient is allowed."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode="entry")
+    result = tools.set_session_mode(
+        storage=storage,
+        arguments={"session_id": sid, "mode": "ambient"},
+        now="2026-05-22T01:00:00Z",
+    )
+    assert result["session"]["mode"] == "ambient"
+    assert storage.get_session(session_id=sid)["mode"] == "ambient"
+
+
+def test_set_session_mode_entry_to_idle_ok(tmp_db_path: str) -> None:
+    """entry → idle is allowed (abort)."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode="entry")
+    result = tools.set_session_mode(
+        storage=storage,
+        arguments={"session_id": sid, "mode": "idle"},
+        now="2026-05-22T01:00:00Z",
+    )
+    assert result["session"]["mode"] == "idle"
+
+
+def test_set_session_mode_ambient_to_idle_ok(tmp_db_path: str) -> None:
+    """ambient → idle is allowed (normal completion)."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode="ambient")
+    result = tools.set_session_mode(
+        storage=storage,
+        arguments={"session_id": sid, "mode": "idle"},
+        now="2026-05-22T01:00:00Z",
+    )
+    assert result["session"]["mode"] == "idle"
+
+
+def test_set_session_mode_idle_to_entry_ok(tmp_db_path: str) -> None:
+    """idle → entry is allowed (resume into new subgraph)."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode="idle")
+    result = tools.set_session_mode(
+        storage=storage,
+        arguments={"session_id": sid, "mode": "entry"},
+        now="2026-05-22T01:00:00Z",
+    )
+    assert result["session"]["mode"] == "entry"
+
+
+def test_set_session_mode_null_to_entry_ok(tmp_db_path: str) -> None:
+    """null (legacy) → entry is allowed (legacy migration)."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode=None)
+    result = tools.set_session_mode(
+        storage=storage,
+        arguments={"session_id": sid, "mode": "entry"},
+        now="2026-05-22T01:00:00Z",
+    )
+    assert result["session"]["mode"] == "entry"
+
+
+def test_set_session_mode_null_to_ambient_ok(tmp_db_path: str) -> None:
+    """null (legacy) → ambient is allowed (heuristic auto-detect on resume)."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode=None)
+    result = tools.set_session_mode(
+        storage=storage,
+        arguments={"session_id": sid, "mode": "ambient"},
+        now="2026-05-22T01:00:00Z",
+    )
+    assert result["session"]["mode"] == "ambient"
+
+
+def test_set_session_mode_self_transition_idempotent(tmp_db_path: str) -> None:
+    """entry → entry (self-transition) is a no-op and must not raise."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode="entry")
+    result = tools.set_session_mode(
+        storage=storage,
+        arguments={"session_id": sid, "mode": "entry"},
+        now="2026-05-22T01:00:00Z",
+    )
+    assert result["session"]["mode"] == "entry"
+
+
+def test_set_session_mode_ambient_to_entry_raises(tmp_db_path: str) -> None:
+    """ambient → entry is disallowed (must go via idle first)."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode="ambient")
+    with pytest.raises(ValueError, match="ambient"):
+        tools.set_session_mode(
+            storage=storage,
+            arguments={"session_id": sid, "mode": "entry"},
+            now="2026-05-22T01:00:00Z",
+        )
+
+
+def test_set_session_mode_idle_to_ambient_raises(tmp_db_path: str) -> None:
+    """idle → ambient is disallowed (must go through entry first)."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode="idle")
+    with pytest.raises(ValueError, match="idle"):
+        tools.set_session_mode(
+            storage=storage,
+            arguments={"session_id": sid, "mode": "ambient"},
+            now="2026-05-22T01:00:00Z",
+        )
+
+
+def test_set_session_mode_closed_value_raises(tmp_db_path: str) -> None:
+    """'closed' is not a valid mode value; must reject regardless of current mode."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode="entry")
+    with pytest.raises(ValueError, match="closed|invalid mode"):
+        tools.set_session_mode(
+            storage=storage,
+            arguments={"session_id": sid, "mode": "closed"},
+            now="2026-05-22T01:00:00Z",
+        )
+
+
+def test_set_session_mode_unknown_session_raises(tmp_db_path: str) -> None:
+    """Passing a non-existent session_id must raise ValueError."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    with pytest.raises(ValueError, match="not found"):
+        tools.set_session_mode(
+            storage=storage,
+            arguments={"session_id": "ses_ghost", "mode": "entry"},
+            now="2026-05-22T01:00:00Z",
+        )
+
+
+def test_set_session_mode_invalid_mode_value_raises(tmp_db_path: str) -> None:
+    """Passing an unrecognised mode string (e.g. 'bogus') must raise ValueError."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    sid = _new_session(storage, mode="entry")
+    with pytest.raises(ValueError, match="bogus|invalid mode"):
+        tools.set_session_mode(
+            storage=storage,
+            arguments={"session_id": sid, "mode": "bogus"},
+            now="2026-05-22T01:00:00Z",
+        )

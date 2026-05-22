@@ -1367,6 +1367,64 @@ class Storage:
             )
             self._touch_session(conn, session_id=session_id, now=now)
 
+    # ------------------------------------------------------------------
+    # v0.3.1 Task 6: session mode lifecycle
+    # ------------------------------------------------------------------
+
+    _ALLOWED_TRANSITIONS: dict = {
+        None: {"entry", "ambient"},
+        "entry": {"ambient", "idle"},
+        "ambient": {"idle"},
+        "idle": {"entry"},
+    }
+
+    def set_session_mode(
+        self, *, session_id: str, mode: str, now: str
+    ) -> dict:
+        """Transition session.mode per the v0.3.1 lifecycle table (§9.1.1).
+
+        Allowed transitions:
+          null  → entry | ambient   (legacy migration)
+          entry → ambient | idle
+          ambient → idle
+          idle  → entry
+
+        Self-transitions (same mode) are idempotent (no-op, returns current row).
+
+        Raises ValueError for:
+          - ``mode`` not in {entry, ambient, idle}
+          - session not found
+          - transition not in the allowed table
+        """
+        if mode not in {"entry", "ambient", "idle"}:
+            raise ValueError(
+                f"invalid mode: {mode!r}. Must be one of entry/ambient/idle."
+            )
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"session not found: {session_id!r}")
+            current = row["mode"]
+            if current == mode:
+                # Idempotent self-transition — return current state unchanged.
+                return {key: row[key] for key in row.keys()}
+            allowed = self._ALLOWED_TRANSITIONS.get(current, set())
+            if mode not in allowed:
+                raise ValueError(
+                    f"invalid transition: {current!r} → {mode!r}. "
+                    f"Allowed from {current!r}: {sorted(allowed)}"
+                )
+            conn.execute(
+                "UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?",
+                (mode, now, session_id),
+            )
+            updated = conn.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        return {key: updated[key] for key in updated.keys()}
+
     def force_delete_node(
         self, *, session_id: str, node_id: str, now: str,
     ) -> None:
