@@ -626,10 +626,17 @@ def pool_list(
 ) -> dict[str, Any]:
     """List Pool items for this scope. Auto-creates scope_root if missing
     (so a fresh dogfood session can call pool_list before pool_add)."""
-    active_only = arguments.get("active_only", True)
+    include_rejected = arguments.get("include_rejected", False)
+    rejected_only = arguments.get("rejected_only", False)
+    # active_only defaults True unless overridden by include_rejected or rejected_only.
+    active_only_default = not (include_rejected or rejected_only)
+    active_only = arguments.get("active_only", active_only_default)
     root = storage.get_or_create_scope_root(scope=scope, now=now)
     items = storage.list_pool_items(
-        scope_root_id=root["id"], active_only=active_only
+        scope_root_id=root["id"],
+        active_only=active_only,
+        include_rejected=include_rejected,
+        rejected_only=rejected_only,
     )
     return {"items": [dict(r) for r in items]}
 

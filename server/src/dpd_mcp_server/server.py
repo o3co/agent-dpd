@@ -566,7 +566,21 @@ async def list_tools() -> list[types.Tool]:
                         "type": ["string", "null"],
                         "description": "Sub-scope identifier for the Pool (optional; defaults to top-level).",
                     },
-                    "active_only": {"type": "boolean", "default": True},
+                    "active_only": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Exclude rejected and dropped items (default). Mutually exclusive with rejected_only.",
+                    },
+                    "include_rejected": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Include rejected items in results (still excludes dropped items).",
+                    },
+                    "rejected_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Return only rejected items. Mutually exclusive with active_only.",
+                    },
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",

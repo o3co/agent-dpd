@@ -990,21 +990,54 @@ class Storage:
             )
 
     def list_pool_items(
-        self, *, scope_root_id: str, active_only: bool = True
+        self,
+        *,
+        scope_root_id: str,
+        active_only: bool = True,
+        include_rejected: bool = False,
+        rejected_only: bool = False,
     ) -> list[sqlite3.Row]:
+        if active_only and rejected_only:
+            raise ValueError("active_only and rejected_only are mutually exclusive")
         with self.connect() as conn:
-            if active_only:
+            if rejected_only:
+                # Return only items that have been rejected (and not dropped).
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM pool_items
+                    WHERE scope_root_id = ?
+                      AND rejected_at IS NOT NULL
+                      AND dropped_at IS NULL
+                    ORDER BY created_at, id
+                    """,
+                    (scope_root_id,),
+                )
+            elif include_rejected:
+                # Return active and rejected items; exclude only dropped.
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM pool_items
+                    WHERE scope_root_id = ?
+                      AND dropped_at IS NULL
+                    ORDER BY created_at, id
+                    """,
+                    (scope_root_id,),
+                )
+            elif active_only:
+                # Default: exclude rejected and dropped items.
                 cursor = conn.execute(
                     """
                     SELECT * FROM pool_items
                     WHERE scope_root_id = ?
                       AND elevated_to IS NULL
+                      AND rejected_at IS NULL
                       AND dropped_at IS NULL
                     ORDER BY created_at, id
                     """,
                     (scope_root_id,),
                 )
             else:
+                # active_only=False with no filter flags: return everything.
                 cursor = conn.execute(
                     "SELECT * FROM pool_items WHERE scope_root_id = ? "
                     "ORDER BY created_at, id",

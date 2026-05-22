@@ -1108,6 +1108,98 @@ def test_pool_drop_marks_active_false(tmp_db_path):
 
 
 # ---------------------------------------------------------------------------
+# Task 2 (v0.3.1): pool_list include_rejected / rejected_only filters
+# ---------------------------------------------------------------------------
+
+
+def _make_rejected_pool_item(storage: Storage, scope: str, text: str) -> str:
+    """Helper: add a pool item and mark it rejected via raw SQL (pool_reject
+    tool does not exist yet — Task 3).  Returns the pool item id."""
+    import sqlite3 as _sqlite3
+    from dpd_mcp_server import tools as _tools
+    added = _tools.pool_add(storage, scope=scope,
+                            arguments={"text": text},
+                            now="2026-05-22T00:00:00Z")
+    pid = added["pool_item"]["id"]
+    with _sqlite3.connect(storage._db_path) as conn:
+        conn.execute(
+            "UPDATE pool_items SET rejected_at = '2026-05-22T01:00:00Z' WHERE id = ?",
+            (pid,),
+        )
+    return pid
+
+
+def test_pool_list_default_excludes_rejected(tmp_db_path):
+    """Default (active_only=True) must exclude rejected items."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    # Add one active item.
+    tools.pool_add(storage, scope="dpd",
+                   arguments={"text": "active item"},
+                   now="2026-05-22T00:00:00Z")
+    # Add one rejected item.
+    _make_rejected_pool_item(storage, scope="dpd", text="rejected item")
+
+    result = tools.pool_list(storage, scope="dpd", arguments={}, now="...")
+    texts = [i["text"] for i in result["items"]]
+    assert "active item" in texts
+    assert "rejected item" not in texts
+
+
+def test_pool_list_include_rejected_returns_all(tmp_db_path):
+    """include_rejected=True returns both active and rejected (excludes dropped)."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    tools.pool_add(storage, scope="dpd",
+                   arguments={"text": "active item"},
+                   now="2026-05-22T00:00:00Z")
+    _make_rejected_pool_item(storage, scope="dpd", text="rejected item")
+    # Also add a dropped item — should stay excluded.
+    dropped = tools.pool_add(storage, scope="dpd",
+                             arguments={"text": "dropped item"},
+                             now="2026-05-22T00:00:00Z")
+    tools.pool_drop(storage, scope="dpd",
+                    arguments={"pool_id": dropped["pool_item"]["id"],
+                               "reason": "noise"},
+                    now="2026-05-22T02:00:00Z")
+
+    result = tools.pool_list(storage, scope="dpd",
+                             arguments={"include_rejected": True},
+                             now="...")
+    texts = [i["text"] for i in result["items"]]
+    assert "active item" in texts
+    assert "rejected item" in texts
+    assert "dropped item" not in texts
+
+
+def test_pool_list_rejected_only_returns_only_rejected(tmp_db_path):
+    """rejected_only=True returns ONLY rejected items."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    tools.pool_add(storage, scope="dpd",
+                   arguments={"text": "active item"},
+                   now="2026-05-22T00:00:00Z")
+    _make_rejected_pool_item(storage, scope="dpd", text="rejected item")
+
+    result = tools.pool_list(storage, scope="dpd",
+                             arguments={"rejected_only": True},
+                             now="...")
+    texts = [i["text"] for i in result["items"]]
+    assert texts == ["rejected item"]
+
+
+def test_pool_list_active_only_and_rejected_only_raises(tmp_db_path):
+    """active_only=True + rejected_only=True must raise ValueError."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="mutually exclusive"):
+        tools.pool_list(storage, scope="dpd",
+                        arguments={"active_only": True, "rejected_only": True},
+                        now="...")
+
+
+# ---------------------------------------------------------------------------
 # Task 6: add_node v3 extension, set_focus root_id, list_open_nodes state
 # ---------------------------------------------------------------------------
 
