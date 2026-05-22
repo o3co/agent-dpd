@@ -1856,7 +1856,7 @@ def test_insert_start_node_with_paired_for_unset(tmp_db_path: str) -> None:
                         now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(
         node_id="n_start", session_id="ses_1", node_type="start",
-        text="Start of subgraph", parent_id="r1", parent_kind="root",
+        text="Start of subgraph", parent_id="r1",
         paired_for=None, achievement_conditions=None,
         now="2026-05-22T00:00:00Z",
     )
@@ -1874,7 +1874,7 @@ def test_insert_end_node_requires_paired_for(tmp_db_path: str) -> None:
                         now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(
         node_id="n_start", session_id="ses_1", node_type="start",
-        text="s", parent_id="r1", parent_kind="root",
+        text="s", parent_id="r1",
         paired_for=None, achievement_conditions=None,
         now="2026-05-22T00:00:00Z",
     )
@@ -1882,7 +1882,7 @@ def test_insert_end_node_requires_paired_for(tmp_db_path: str) -> None:
     with pytest.raises(ValueError, match="paired_for"):
         storage.insert_node_v3(
             node_id="n_end", session_id="ses_1", node_type="end",
-            text="e", parent_id="n_start", parent_kind="node",
+            text="e", parent_id="n_start",
             paired_for=None,  # MISSING — must raise
             achievement_conditions="done when X",
             now="2026-05-22T00:00:00Z",
@@ -1897,15 +1897,15 @@ def test_mark_reached_transitions_subgraph_to_closed(tmp_db_path: str) -> None:
                         now="2026-05-22T00:00:00Z")
     # Subgraph: r1 → start → middle → end
     storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
-                           text="s", parent_id="r1", parent_kind="root",
+                           text="s", parent_id="r1",
                            paired_for=None, achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_m", session_id="ses_1", node_type="question",
-                           text="m", parent_id="n_s", parent_kind="node",
+                           text="m", parent_id="n_s",
                            paired_for=None, achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
-                           text="e", parent_id="n_m", parent_kind="node",
+                           text="e", parent_id="n_m",
                            paired_for="n_s",
                            achievement_conditions="done when X",
                            now="2026-05-22T00:00:00Z")
@@ -1928,12 +1928,12 @@ def test_mark_reached_rejects_unreachable_end(tmp_db_path: str) -> None:
     storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
                         now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
-                           text="s", parent_id="r1", parent_kind="root",
+                           text="s", parent_id="r1",
                            paired_for=None, achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
     # End is NOT under start (parented to root instead)
     storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
-                           text="e", parent_id="r1", parent_kind="root",
+                           text="e", parent_id="r1",
                            paired_for="n_s",
                            achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
@@ -1950,11 +1950,11 @@ def test_dump_persist_transitions_closed_to_deletable(tmp_db_path: str) -> None:
     storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
                         now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
-                           text="s", parent_id="r1", parent_kind="root",
+                           text="s", parent_id="r1",
                            paired_for=None, achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
-                           text="e", parent_id="n_s", parent_kind="node",
+                           text="e", parent_id="n_s",
                            paired_for="n_s",
                            achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
@@ -1975,11 +1975,11 @@ def test_delete_subgraph_removes_nodes_and_edges(tmp_db_path: str) -> None:
     storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
                         now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
-                           text="s", parent_id="r1", parent_kind="root",
+                           text="s", parent_id="r1",
                            paired_for=None, achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
-                           text="e", parent_id="n_s", parent_kind="node",
+                           text="e", parent_id="n_s",
                            paired_for="n_s",
                            achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
@@ -2008,3 +2008,30 @@ def test_get_or_create_scope_root_top_level_idempotent(tmp_db_path: str) -> None
     r1 = storage.get_or_create_scope_root(scope=None, now="2026-05-22T00:00:00Z")
     r2 = storage.get_or_create_scope_root(scope=None, now="2026-05-22T01:00:00Z")
     assert r1["id"] == r2["id"]
+
+
+def test_insert_node_v3_atomic_classify_and_insert(tmp_db_path: str) -> None:
+    """insert_node_v3 must classify and insert in a single transaction.
+
+    Verify behaviorally by checking that the method signature no longer takes
+    parent_kind (= classification happens internally)."""
+    import inspect
+    from dpd_mcp_server.storage import Storage
+    sig = inspect.signature(Storage.insert_node_v3)
+    assert "parent_kind" not in sig.parameters, \
+        "insert_node_v3 must not take parent_kind (classify internally)"
+
+
+def test_insert_node_v3_raises_when_parent_missing(tmp_db_path: str) -> None:
+    """insert_node_v3 must raise ValueError when parent_id doesn't exist."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    import pytest
+    with pytest.raises(ValueError, match="parent_id"):
+        storage.insert_node_v3(
+            node_id="n_orphan", session_id="ses_1", node_type="question",
+            text="x", parent_id="nonexistent_parent",
+            paired_for=None, achievement_conditions=None,
+            now="2026-05-22T00:00:00Z",
+        )

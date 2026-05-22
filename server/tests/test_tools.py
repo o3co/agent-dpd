@@ -1059,11 +1059,11 @@ def test_pool_elevate_links_to_node(tmp_db_path):
     storage.insert_root(root_id="r_legacy", session_id="ses_1", topic="t",
                         now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
-                           text="s", parent_id="r_legacy", parent_kind="root",
+                           text="s", parent_id="r_legacy",
                            paired_for=None, achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
-                           text="e", parent_id="n_s", parent_kind="node",
+                           text="e", parent_id="n_s",
                            paired_for="n_s", achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
 
@@ -1164,12 +1164,12 @@ def test_list_open_nodes_filters_by_state(tmp_db_path):
                         now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_a", session_id="ses_1",
                            node_type="question", text="a",
-                           parent_id="r1", parent_kind="root",
+                           parent_id="r1",
                            paired_for=None, achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
     storage.insert_node_v3(node_id="n_b", session_id="ses_1",
                            node_type="question", text="b",
-                           parent_id="r1", parent_kind="root",
+                           parent_id="r1",
                            paired_for=None, achievement_conditions=None,
                            now="2026-05-22T00:00:00Z")
     # Force n_b into closed state.

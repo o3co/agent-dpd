@@ -235,26 +235,6 @@ class Storage:
             )
             self._touch_session(conn, session_id=session_id, now=now)
 
-    def classify_parent_kind(self, *, session_id: str, parent_id: str) -> str:
-        """Return 'root' or 'node' based on where parent_id exists in this session.
-
-        Raises ValueError if parent_id is not found in either roots or nodes.
-        """
-        with self.connect() as conn:
-            if conn.execute(
-                "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
-                (session_id, parent_id),
-            ).fetchone():
-                return "root"
-            if conn.execute(
-                "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
-                (session_id, parent_id),
-            ).fetchone():
-                return "node"
-        raise ValueError(
-            f"parent_id {parent_id!r} not found in session {session_id!r}"
-        )
-
     def insert_node_under_parent(
         self,
         *,
@@ -995,7 +975,6 @@ class Storage:
         node_type: str,
         text: str,
         parent_id: str,
-        parent_kind: str,
         paired_for: str | None,
         achievement_conditions: str | None,
         now: str,
@@ -1003,10 +982,31 @@ class Storage:
         """v3 node insert: supports paired_for + achievement_conditions + state=active.
 
         End nodes must specify paired_for (= the Start node they terminate).
+
+        Classify-and-insert run in a single transaction so a concurrent delete
+        between the lookup and the insert cannot create an orphan node row.
+        parent_kind is derived internally by querying roots then nodes within
+        the same transaction — callers must not pass it.
+
+        Raises ValueError if parent_id is not found in either roots or nodes.
         """
         if node_type == "end" and not paired_for:
             raise ValueError("End nodes require paired_for (= paired Start id)")
         with self.connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                (session_id, parent_id),
+            ).fetchone():
+                parent_kind = "root"
+            elif conn.execute(
+                "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
+                (session_id, parent_id),
+            ).fetchone():
+                parent_kind = "node"
+            else:
+                raise ValueError(
+                    f"parent_id {parent_id!r} not found in session {session_id!r}"
+                )
             conn.execute(
                 """
                 INSERT INTO nodes

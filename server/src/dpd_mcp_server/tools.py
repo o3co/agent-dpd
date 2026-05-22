@@ -75,19 +75,13 @@ def add_node(
 
     is_v3 = node_type in _V3_NODE_TYPES or paired_for is not None or achievement_conditions is not None
     if is_v3:
-        # Classify parent_kind via the same logic as insert_node_under_parent.
-        # Re-use the DB queries directly so parent-existence validation is atomic.
         try:
-            parent_kind = storage.classify_parent_kind(
-                session_id=session_id, parent_id=parent_id
-            )
             storage.insert_node_v3(
                 node_id=nid,
                 session_id=session_id,
                 node_type=node_type,
                 text=text,
                 parent_id=parent_id,
-                parent_kind=parent_kind,
                 paired_for=paired_for,
                 achievement_conditions=achievement_conditions,
                 now=now,
@@ -680,7 +674,7 @@ def pool_elevate(
     storage.insert_node_v3(
         node_id=new_id_, session_id=session_id,
         node_type=node_type, text=final_text,
-        parent_id=target_end_node_id, parent_kind="node",
+        parent_id=target_end_node_id,
         paired_for=None, achievement_conditions=None,
         now=now,
     )
