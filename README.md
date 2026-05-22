@@ -6,12 +6,12 @@ Monorepo for DPD (Decompose-Propagate Decision) — a graph-based protocol for s
 
 ```text
 dpd/
-├── server/   MCP server (Python, stdio, sqlite) — graph state + tool API
+├── mcp/      MCP server (Python, stdio, sqlite) — graph state + tool API
 ├── skill/    Claude Code skill — conversational UX + MCP client
 └── docs/     Spec (graduated from agent scope's docs/prgp-v<N>-*.md)
 ```
 
-`server/` and `skill/` are coupled by design: the skill consumes the server's MCP tool API; the server stores no conversational state of its own. Install both together via the root `install.sh` (planned, Phase 1+).
+`mcp/` and `skill/` are coupled by design: the skill consumes the server's MCP tool API; the server stores no conversational state of its own. Install both together via the root `install.sh` (planned, Phase 1+).
 
 ## Status
 
