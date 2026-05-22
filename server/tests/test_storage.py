@@ -1644,3 +1644,63 @@ def test_resolve_branch_rejects_rationale_text_without_rationale_id(tmp_db_path:
     assert h1["status"] == "open"
     # No decision should exist (pre-flight failure)
     assert storage.get_node(session_id="ses_1", node_id="d1") is None
+
+
+# ---------------------------------------------------------------------------
+# v0.3 schema tests
+# ---------------------------------------------------------------------------
+
+
+def test_v3_pool_items_table_exists(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='pool_items'"
+        )
+        assert cursor.fetchone() is not None
+
+
+def test_v3_nodes_has_new_columns(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        rows = conn.execute("PRAGMA table_info(nodes)").fetchall()
+        names = {row[1] for row in rows}
+    for col in ("paired_for", "achievement_conditions",
+                "achievement_conditions_satisfied", "state",
+                "archived_at", "closed_at", "deletable_at"):
+        assert col in names, f"missing column {col}"
+
+
+def test_v3_roots_has_scope_columns(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        rows = conn.execute("PRAGMA table_info(roots)").fetchall()
+        names = {row[1]: row for row in rows}
+    for col in ("scope", "scope_root", "migrated_to_start_id"):
+        assert col in names, f"missing column {col}"
+    # session_id must be NULLABLE in v3 (column 3 of PRAGMA = notnull flag)
+    notnull = names["session_id"][3]
+    assert notnull == 0, "roots.session_id must be NULLABLE in v3"
+
+
+def test_v3_node_types_include_start_and_end(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        # Insert a session + a root + nodes with start/end types
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) VALUES "
+            "('ses_1', '2026-05-22T00:00:00Z', '2026-05-22T00:00:00Z')"
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) VALUES "
+            "('root_1', 'ses_1', 't', 'active', '2026-05-22T00:00:00Z')"
+        )
+        # Both must succeed:
+        for t in ("start", "end"):
+            conn.execute(
+                "INSERT INTO nodes "
+                "(id, session_id, type, text, status, parent_id, parent_kind, "
+                "created_at, updated_at) VALUES "
+                f"('n_{t}', 'ses_1', '{t}', 'x', 'open', 'root_1', 'root', "
+                "'2026-05-22T00:00:00Z', '2026-05-22T00:00:00Z')"
+            )
