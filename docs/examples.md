@@ -13,68 +13,80 @@ For the protocol concept and lifecycle, see [`concept.md`](concept.md). For the 
 ### Conversation
 
 ```text
-You: FCoT を OSS で出してから半年で community が育ってきた。マネタイズ方法を決めたい。
+You: I open-sourced FCoT six months ago, and community usage is growing.
+     I want to decide a monetization model without killing the OSS adoption
+     I depend on.
      /dpd
-DPD: 提案するアンカー:
-       Start: FCoT skill のマネタイズモデルを決める
-       End:   採用モデルが 1 つに決まり、却下案とその根拠も記録されている
-       (achievement_conditions:
-         - 採用モデルが 1 つに絞られている
-         - 却下案それぞれに却下理由が紐づいている
-         - 決定 + rationale ノードが存在する)
-     適用しますか？
+DPD: Proposing this anchor:
+       Start: Decide a monetization model for the FCoT skill
+       End:   One model is chosen, with rejection reasons recorded for the others
+       (achievement conditions:
+         - one model picked
+         - each rejected option has a reason attached
+         - decision + rationale nodes exist)
+     Apply?
 You: yes
 DPD: [Start + End anchor created]
-     ambient モードに入りました。
+     Entering ambient mode.
 
-[しばらく議論。候補として浮上するモデル、市場慣行など]
+[some discussion: candidate models, market norms, comparable products]
 
-DPD: 候補が 4 案出揃いました。記録します:
-       - 仮説 A: Pure subscription SaaS — FCoT 全機能を月額 hosted で
-       - 仮説 B: One-time license / per-org enterprise — 企業ごとに 1 回課金
-       - 仮説 C: OSS + freemium hosted — skill 本体は OSS、有料 hosted 層を追加
-       - 仮説 D: OSS + consulting — skill 無料、導入支援で収益
-     適用しますか？
-You: yes、出揃った感じ
+DPD: I'd like to record four hypotheses for the candidate models:
+       - hypothesis A: Pure subscription SaaS — all FCoT functionality
+                       behind a monthly hosted service
+       - hypothesis B: One-time license / per-org enterprise — one charge
+                       per organization, unlimited internal use
+       - hypothesis C: OSS + freemium hosted — skill itself stays OSS,
+                       paid hosted layer adds team/audit/SLA value
+       - hypothesis D: OSS + consulting — skill stays free, revenue from
+                       deployment support and training
+     Apply?
+You: yes, that's the full set as far as I can think.
 
-[さらに議論。事実関係を整理]
+[discussion continues — surfacing the constraints]
 
-DPD: 3 つの evidence を記録します:
-       - "FCoT は既に OSS 公開済み — 事後的に閉じると traction が崩れる"
-       - "企業導入には監査ログ/SSO/SLA/private deploy が必須 — OSS 単体では満たせず"
-       - "skill 単独の license / per-seat 課金は技術的にも文化的にも enforce 困難"
-     適用しますか？
+DPD: Three evidence nodes:
+       - "FCoT is already published as OSS — retroactively closing it would
+          sacrifice the early traction"
+       - "Enterprise adoption requires audit logs / SSO / SLA / private deploy,
+          which the OSS skill alone cannot satisfy — a hosted layer is needed"
+       - "Per-seat / per-skill licensing is hard to enforce both technically
+          (the code is a copyable repo) and culturally"
+     Apply?
 You: yes
 
-[決め所]
+[deciding]
 
-You: 案 C で行こう。OSS は手放さず、hosted 層で価値交換が成立する形に。
-DPD: 確認します:
-       - 決定: 案 C (OSS + freemium hosted) を採用
-       - 根拠: 3 つの evidence が同じ方向を指している。価値交換層 (= hosted SaaS) に
-              課金、コア技術は OSS のまま保つ — 採用ルートと収益ルートが分離して衝突しない
-       - 仮説 A, B, D を却下として close (derived_from edge: 決定 → 仮説 C)
-     End 条件を満たしました。mark_reached?
+You: Let's go with C. Keep the OSS, monetize the hosted layer.
+DPD: Confirming:
+       - decision: hypothesis C (OSS + freemium hosted) adopted
+       - rationale: the three evidence nodes all point the same way. Money
+                    moves at the layer where actual value is exchanged
+                    (= hosted SaaS); the core stays open. Adoption channel
+                    and revenue channel are separate, so they don't collide.
+       - hypotheses A, B, D close as rejected
+         (derived_from edge: decision → hypothesis C)
+     End conditions satisfied. mark_reached?
 You: yes
-DPD: [mark_reached] subgraph closed。
+DPD: [mark_reached] subgraph closed.
 ```
 
 ### Resulting graph
 
 ```mermaid
 graph TD
-    root["root: FCoT skill のマネタイズモデル選定"]
-    S["start: FCoT のマネタイズモデルを決める"]
-    E["end: 採用モデルが 1 つに決まり、却下案とその根拠も記録"]
+    root["root: FCoT skill monetization model"]
+    S["start: pick a monetization model for FCoT"]
+    E["end: one model chosen + rejection reasons recorded"]
     A["hypothesis A: Pure subscription SaaS"]
     B["hypothesis B: One-time license / per-org"]
     C["hypothesis C: OSS + freemium hosted"]
     D["hypothesis D: OSS + consulting"]
-    E1["evidence: 既に OSS 公開済み — 閉じると traction が崩れる"]
-    E2["evidence: 企業導入は監査ログ/SSO/SLA/private deploy 要件"]
-    E3["evidence: skill 単独の license/per-seat は enforce 困難"]
-    DEC["decision: 案 C を採用"]
-    R["rationale: 3 evidence が同方向 — 採用ルート と 収益ルート が分離"]
+    E1["evidence: already published as OSS — closing it loses traction"]
+    E2["evidence: enterprise needs audit / SSO / SLA / private deploy"]
+    E3["evidence: per-seat licensing on a skill is hard to enforce"]
+    DEC["decision: adopt option C"]
+    R["rationale: evidence converges — separate adoption vs. revenue layers"]
 
     root --> S
     S --> E
@@ -118,71 +130,81 @@ graph TD
 
 This example shows the *casual-conversation → /dpd → narrowing → spec* flow, which is where DPD's End-narrowing pressure earns its keep.
 
-### Conversation
+### Walkthrough
 
 ```text
-You: 友達 3-5 人で気軽に遊べるスマホアプリ作りたいんだけど、何作るかで悩んでて。
-     案としてはこんなのが浮かんでる:
-       - リアルタイム共同お絵かき (24h で消える)
-       - 同期視聴 (友達と同時に YouTube とか)
-       - 早押しクイズ (party game 系)
-       - 食事タイミング同期 (せーので乾杯系)
+You: I want to build a phone app that small groups of friends (3–5) can
+     enjoy casually. Ideas floating around:
+       - real-time collaborative drawing (24h-disappearing canvas)
+       - synced video watching (watch parties)
+       - speed quiz (party game style)
+       - "say cheers at the same time" food sync app
      /dpd
-DPD: ゴール "友達と楽しめる" は広いです — narrowing を提案します:
-       Start: 友達 3-5 人で「リアルタイムに体験を共有して楽しむ」スマホアプリを作りたい
-       End:   初版が解く課題が 1 つに絞られ、最小スコープ仕様
-              (target user / core interaction / 出荷 platform / 明示的な non-goals) が確定
-     適用しますか？
+DPD: The goal "an app to enjoy with friends" is very broad — proposing
+     to narrow it:
+       Start: A phone app for 3–5 friends to share a real-time experience
+       End:   The first-release problem is narrowed to one, and a minimum
+              spec is set (target user / core interaction / launch platform /
+              explicit non-goals)
+     Apply?
 You: yes
-DPD: [anchor created] ambient モードへ。
+DPD: [anchor created] entering ambient mode.
 
-[案を hypothesis として全部 park。質問しながら絞っていく]
+[four candidate ideas get parked as hypotheses]
 
-DPD: 4 案を仮説として登録しました。次は絞り込みの判断材料を集めましょう。
+DPD: All four candidates are now hypotheses under the Start. Next we need
+     material to narrow it down.
 
-[技術リスクと差別化を議論]
+[discussion of technical risk and differentiation]
 
-DPD: 2 つの evidence を記録します:
-       - 技術リスク差: 共同お絵かき = WebRTC/CRDT で中難度、同期視聴 = 著作権/帯域で高、
-                       早押しクイズ = 問題コンテンツ調達が継続コスト、食事同期 = UX 設計が肝
-       - 差別化余地: 同期視聴/早押しクイズは大手 (Discord/Kahoot) と直接競合。
-                     共同お絵かきは spontaneous な遊びの場として既存サービス少なくニッチが空いている
-     適用しますか？
+DPD: Two evidence nodes:
+       - "Tech risk varies: co-drawing = WebRTC/CRDT, medium; synced video =
+          rights + bandwidth, high; quiz = ongoing content sourcing cost;
+          food sync = UX design is the hard part, tech is light"
+       - "Co-drawing has open space in the market — synced video and quiz
+          compete head-on with established players (Discord, Kahoot).
+          Spontaneous-drawing-with-friends is underserved."
+     Apply?
 You: yes
 
-[決め所]
+[deciding]
 
-You: 案 A (共同お絵かき) で行く。target は LINE で既に繋がってる仲、出荷は iOS から、
-     最初は AI 補正も公開フィードも課金もなし。
-DPD: 決定を整理します:
-       - 決定: 案 A (リアルタイム共同お絵かき) 採用
-         target: LINE 等で既に繋がる 3-5 人グループ
-         core interaction: 1 枚のキャンバスに同時書き込み + 24h で消える
-         platform: iOS から
-         non-goals: 公開フィード / AI 補正 / 課金 / 6 人以上対応 (= v0.2 以降)
-       - 根拠: 技術リスク中 + ニッチが空 + spontaneity がゲームの本質
-              (同期視聴/クイズは "コンテンツ依存"、共同お絵かきは "場依存")
-       - 案 B, C, D を rejected として close
-     End 条件達成、mark_reached?
+You: Let's go with A (co-drawing). Target: 3–5 friend groups already
+     connected on chat apps. Ship on iOS first. No AI features, no public
+     feed, no monetization in v1.
+DPD: Recording the decision with its spec dimensions:
+       - decision: hypothesis A (real-time collaborative drawing) adopted
+         target: friend groups (3–5) already connected via existing chat apps
+         core interaction: shared canvas with simultaneous strokes, 24h decay
+         platform: iOS first
+         non-goals: public feed / AI assistance / monetization /
+                    6+ user support (= v0.2 backlog)
+       - rationale: tech risk is moderate (achievable) + market gap (no
+                    direct competitor) + the "spontaneity" of drawing is
+                    venue-dependent rather than content-dependent
+                    (synced video and quiz need a constant content supply;
+                    drawing just needs friends present together)
+       - hypotheses B, C, D close as rejected
+     End conditions satisfied. mark_reached?
 You: yes
 DPD: [mark_reached]
 ```
 
-### Resulting graph
+### The resulting structure
 
 ```mermaid
 graph TD
-    root["root: 友達 3-5 人で楽しめるスマホアプリの初期 spec"]
-    S["start: 体験を共有して楽しむアプリの初版 spec を絞る"]
-    E["end: 初版が解く課題が 1 つ + 最小 spec が確定"]
-    A["hypothesis A: リアルタイム共同お絵かき"]
-    B["hypothesis B: 同期視聴 (watch party)"]
-    C["hypothesis C: みんなで早押しクイズ"]
-    D["hypothesis D: 食事タイミング同期"]
-    EV1["evidence: 技術リスクの差"]
-    EV2["evidence: 差別化余地 — 共同お絵かきはニッチが空"]
-    DEC["decision: 案 A 採用 + target / interaction / platform / non-goals"]
-    R["rationale: 技術リスク中 + 競合空き + spontaneity = 場依存"]
+    root["root: friend-app first-release spec"]
+    S["start: narrow a shared-experience app to a minimum spec"]
+    E["end: one problem chosen + minimum spec recorded"]
+    A["hypothesis A: real-time collaborative drawing"]
+    B["hypothesis B: synced video (watch party)"]
+    C["hypothesis C: speed quiz"]
+    D["hypothesis D: meal-timing sync"]
+    EV1["evidence: differing tech risk across the four ideas"]
+    EV2["evidence: differentiation — co-drawing has open market space"]
+    DEC["decision: adopt A + target / interaction / platform / non-goals"]
+    R["rationale: moderate tech risk + market gap + venue-dependent fun"]
 
     root --> S
     S --> E
@@ -211,12 +233,12 @@ graph TD
     classDef closed_rejected fill:#f5a3a3,stroke:#8c3030
 ```
 
-### What you get from this
+### What this gives you
 
 - The vague "friend app" goal got narrowed to a single first-release spec. Three plausible alternatives sit in the graph as rejected, with reasons.
 - The decision itself carries **structured spec content** (target user / core interaction / platform / non-goals). It's not just "we picked A" — it's "we picked A with these dimensions".
 - Non-goals are first-class in the decision text. This is the difference between a spec and a wishlist.
-- When v0.2 planning starts, the `non-goals` list ("AI 補正 / public feed / monetization / 6+ users") is the natural backlog. Each can be opened as a new root in a fresh DPD session.
+- When v0.2 planning starts, the recorded non-goals (AI assistance / public feed / monetization / 6+ users) are the natural backlog. Each can be opened as a new root in a fresh DPD session.
 
 ---
 
@@ -229,18 +251,21 @@ This is the **`/dpd-import → /dpd-fill → /fcot`** pipeline. DPD itself was v
 The short version:
 
 ```text
-You: 仕様ドラフトができた。漏れがないか機械的にチェックしたい。
+You: Spec draft is done. I want to check it for gaps mechanically, not just
+     by eyeballing it.
      /dpd-import docs/my-spec.md
-DPD: [spec を archived subgraph として取り込み — 各セクションがノード化]
+DPD: [imported the spec as an archived subgraph — each section becomes a node]
 
 You: /dpd-fill
-DPD: 推論ノードを生成しました (n 個)。
-     各候補は provenance='inferred' でマーク済み、保持には opt-in 必要。
+DPD: Generated N inferred nodes (missing decompositions, unstated
+     assumptions, claims the spec implies but doesn't state).
+     Each carries provenance='inferred' and needs explicit opt-in to keep.
 
 You: /fcot
-DPD: 各推論ノードに反証 chain-of-thought を回します。
-     結果: x/n falsified (spec が既にカバー済み)、y/n confirmed (real gap)
-     real gap を「対応 TODO」として記録しますか？
+DPD: Running falsification chain-of-thought against each inferred node.
+     Results: x/n falsified (already covered by the spec),
+              y/n confirmed (real gap).
+     Record the real gaps as TODOs?
 ```
 
 The interesting part is **`/fcot` filtering out the over-eager `/dpd-fill`**. Inferred nodes that sound plausible but are already addressed by the spec get marked `falsified` and dropped. What survives is the actual list of holes worth fixing.
@@ -261,44 +286,48 @@ For the concrete findings on DPD's own v0.3.1 spec (A1: `/dpd-abort` reference t
 Step 1 — Plan ingestion (any agent, before starting work):
 
 You: /dpd-import docs/feature-x-spec.md
-DPD: [spec をアーカイブ subgraph として取り込み]
+DPD: [imported the spec as an archived subgraph]
 
-You: 開発 TODO に変換したい。spec から各タスクを抽出して active subgraph として spawn して。
-DPD: [新規 root を spawn。spec の各セクションを TODO ノードとして登録]
+You: Convert this into a development TODO. Pull each task out of the spec
+     and spawn an active subgraph for it.
+DPD: [spawned a new root; each spec section is registered as a TODO node]
 
 You: /dpd-fill
-DPD: 推論ノード生成 — spec が暗示するが未明示のタスク候補:
-       - "DB migration が必要 (schema 変更が含まれるため)"
-       - "feature flag を導入する必要"
-       - "監視ダッシュボードに metric を追加"
-     /fcot で反証チェックしますか?
+DPD: Generated inferred TODOs — tasks the spec implies but doesn't state:
+       - "DB migration needed (schema change involved)"
+       - "Feature flag required"
+       - "Metric needs to be added to the monitoring dashboard"
+     Run /fcot to falsify-check these?
 You: yes
-DPD: [/fcot 適用] 3 個中 1 個 falsified、2 個 real gap として保持。
-You: 保持した 2 つを TODO に追加。
+DPD: [/fcot applied] 1 of 3 falsified, 2 kept as real gaps.
+You: Add the surviving two to the TODO list.
 
 Step 2 — Agent A starts implementing:
 
 You: /dpd-status
-DPD: [active TODO ノード一覧、未着手 12 個、進行中 0]
+DPD: [active TODO nodes: 12 not started, 0 in progress]
 
-[agent A が個別ノードに focus、close_node で完了マーク、ambient で新たな問題を Pool に park]
-[セッション後半で context 残量が減ってくる]
+[agent A focuses on individual nodes, closes them as completed, parks new
+ observations into Pool as they surface]
+[late in the session, context starts running low]
 
-You: そろそろ context 切れそう。今の状況を次の agent に引き継ぐ準備をして。
-DPD: focus は今 node_xxx (実装中: API endpoint 設計)。
-     残り open: 7 ノード。Pool に新規観察 3 件 (route validation, error code 統一,
-     test fixture の改修)。次 agent 向けに /dpd-status の出力を残しておきます。
+You: I'm about to run out of context. Prep a handoff for the next agent.
+DPD: Current focus: node_xxx (in progress: API endpoint design).
+     Remaining open: 7 nodes. Pool now has 3 new observations
+     (route validation, error code unification, test fixture refactor).
+     The /dpd-status output is preserved for the next agent to pick up.
 
 Step 3 — Agent B resumes in a fresh session:
 
 You: /dpd
-DPD: 既存 session あり: "feature-x 実装"
-     mode = ambient、focus = node_xxx (API endpoint 設計、進行中)
-     未着手 7、Pool 3 (route validation, error code 統一, test fixture の改修)
-     (a) 続ける  (b) 別 session を始める  どちらにしますか？
+DPD: Found an existing session: "feature-x implementation"
+     mode = ambient, focus = node_xxx (API endpoint design, in progress)
+     7 open, 3 pool items (route validation, error code unification,
+     test fixture refactor)
+     (a) Continue  (b) Start a new session
 You: a
-DPD: [resume] focus_node が前回の作業文脈を復元しました。
-     /dpd-status で詳細を確認できます。
+DPD: [resume] focus_node restored to where the previous agent left off.
+     Use /dpd-status to see details.
 ```
 
 ### Why DPD fits this
