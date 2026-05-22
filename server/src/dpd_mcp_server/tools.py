@@ -563,6 +563,114 @@ def export_yaml(
     return {"yaml": _json.dumps(payload, indent=2, ensure_ascii=False)}
 
 
+def pool_add(
+    storage: Storage,
+    *,
+    scope: str | None,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Append a raw thought to the scope's Pool.
+
+    Auto-creates scope_root if missing for this scope.
+    """
+    from .ids import pool_id as _pool_id
+    text = arguments["text"]
+    tags = arguments.get("tags")
+    origin_session_id = arguments.get("origin_session_id")
+    origin_turn = arguments.get("origin_turn")
+    root = storage.get_or_create_scope_root(scope=scope, now=now)
+    new_id_ = _pool_id()
+    storage.insert_pool_item(
+        pool_id=new_id_, scope_root_id=root["id"],
+        text=text, origin_session_id=origin_session_id,
+        origin_turn=origin_turn, tags=tags, now=now,
+    )
+    items = storage.list_pool_items(scope_root_id=root["id"], active_only=False)
+    item = next((dict(r) for r in items if r["id"] == new_id_), None)
+    return {"pool_item": item}
+
+
+def pool_list(
+    storage: Storage,
+    *,
+    scope: str | None,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """List Pool items for this scope. Auto-creates scope_root if missing
+    (so a fresh dogfood session can call pool_list before pool_add)."""
+    active_only = arguments.get("active_only", True)
+    root = storage.get_or_create_scope_root(scope=scope, now=now)
+    items = storage.list_pool_items(
+        scope_root_id=root["id"], active_only=active_only
+    )
+    return {"items": [dict(r) for r in items]}
+
+
+def pool_elevate(
+    storage: Storage,
+    *,
+    scope: str | None,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Move a Pool item into the DPD graph as a node under target_end_node_id's subgraph.
+
+    Requires target_end_node_id (per spec §6.1 S5 fix — End-less elevation is
+    not allowed). Creates a child node under the End and marks the Pool item elevated.
+    """
+    from .ids import node_id as _node_id
+    pool_id_ = arguments["pool_id"]
+    target_end_node_id = arguments["target_end_node_id"]
+    node_type = arguments["type"]
+    session_id = arguments["session_id"]
+    text_override = arguments.get("text")
+
+    end_node = storage.get_node(session_id=session_id, node_id=target_end_node_id)
+    if end_node is None or end_node["type"] != "end":
+        raise ValueError(
+            f"target_end_node_id {target_end_node_id!r} is not an end node "
+            f"in session {session_id!r}"
+        )
+
+    # Resolve text: use override or fall back to Pool item text.
+    pool_root = storage.get_or_create_scope_root(scope=scope, now=now)
+    items = storage.list_pool_items(
+        scope_root_id=pool_root["id"], active_only=False
+    )
+    pool_item = next((dict(r) for r in items if r["id"] == pool_id_), None)
+    if pool_item is None:
+        raise ValueError(f"pool_id {pool_id_!r} not found in scope {scope!r}")
+    final_text = text_override or pool_item["text"]
+
+    new_id_ = _node_id()
+    storage.insert_node_v3(
+        node_id=new_id_, session_id=session_id,
+        node_type=node_type, text=final_text,
+        parent_id=target_end_node_id, parent_kind="node",
+        paired_for=None, achievement_conditions=None,
+        now=now,
+    )
+    storage.mark_pool_elevated(pool_id=pool_id_, elevated_to=new_id_, now=now)
+    elevated = storage.get_node(session_id=session_id, node_id=new_id_)
+    return {"elevated_node": dict(elevated), "pool_id": pool_id_}
+
+
+def pool_drop(
+    storage: Storage,
+    *,
+    scope: str | None,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Mark a Pool item as dropped (= no longer active for elevation)."""
+    pool_id_ = arguments["pool_id"]
+    reason = arguments.get("reason")
+    storage.drop_pool_item(pool_id=pool_id_, reason=reason, now=now)
+    return {"pool_id": pool_id_, "dropped_at": now}
+
+
 def _required(arguments: dict[str, Any], key: str) -> Any:
     value = arguments.get(key)
     if value is None or value == "":

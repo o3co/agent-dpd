@@ -1032,3 +1032,76 @@ def test_resolve_branch_tool_validates_closure_reason(storage: Storage) -> None:
             now="2026-05-21T11:00:00Z",
             new_id=lambda p: f"{p}_x",
         )
+
+
+def test_pool_add_creates_scope_root_if_missing(tmp_db_path):
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    result = tools.pool_add(
+        storage, scope="dpd",
+        arguments={"text": "raw thought 1", "tags": "tangent"},
+        now="2026-05-22T00:00:00Z",
+    )
+    assert "pool_item" in result
+    assert result["pool_item"]["text"] == "raw thought 1"
+    # scope_root was auto-created
+    items = tools.pool_list(storage, scope="dpd", arguments={}, now="...")
+    assert len(items["items"]) == 1
+
+
+def test_pool_elevate_links_to_node(tmp_db_path):
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    # Set up scope_root + session + a target end node to elevate into.
+    storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T00:00:00Z")
+    storage.insert_session(session_id="ses_1", scope="dpd", label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r_legacy", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
+                           text="s", parent_id="r_legacy", parent_kind="root",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
+                           text="e", parent_id="n_s", parent_kind="node",
+                           paired_for="n_s", achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+
+    pool_added = tools.pool_add(
+        storage, scope="dpd",
+        arguments={"text": "evidence X"},
+        now="2026-05-22T00:00:00Z",
+    )
+    pid = pool_added["pool_item"]["id"]
+    result = tools.pool_elevate(
+        storage, scope="dpd",
+        arguments={
+            "pool_id": pid,
+            "target_end_node_id": "n_e",
+            "type": "evidence",
+            "session_id": "ses_1",
+        },
+        now="2026-05-22T01:00:00Z",
+    )
+    assert "elevated_node" in result
+    # pool item is no longer in active list
+    actives = tools.pool_list(storage, scope="dpd",
+                              arguments={"active_only": True},
+                              now="...")
+    assert actives["items"] == []
+
+
+def test_pool_drop_marks_active_false(tmp_db_path):
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    added = tools.pool_add(storage, scope="dpd",
+                           arguments={"text": "noise"},
+                           now="2026-05-22T00:00:00Z")
+    tools.pool_drop(storage, scope="dpd",
+                    arguments={"pool_id": added["pool_item"]["id"],
+                               "reason": "irrelevant"},
+                    now="2026-05-22T01:00:00Z")
+    actives = tools.pool_list(storage, scope="dpd",
+                              arguments={"active_only": True},
+                              now="...")
+    assert actives["items"] == []

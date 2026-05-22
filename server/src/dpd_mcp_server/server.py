@@ -500,6 +500,93 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="pool_add",
+            title="Pool: add item",
+            description="Append a raw thought to the scope's Pool (staging area before DPD assignment).",
+            inputSchema={
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "scope": {
+                        "type": ["string", "null"],
+                        "description": "Sub-scope identifier for the Pool (optional; defaults to top-level).",
+                    },
+                    "tags": {"type": "string", "description": "Comma-separated free-form tags."},
+                    "origin_session_id": {"type": "string"},
+                    "origin_turn": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="pool_list",
+            title="Pool: list items",
+            description="List Pool items for the current scope.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": ["string", "null"],
+                        "description": "Sub-scope identifier for the Pool (optional; defaults to top-level).",
+                    },
+                    "active_only": {"type": "boolean", "default": True},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="pool_elevate",
+            title="Pool: elevate item",
+            description="Elevate a Pool item into the DPD graph as a child of the target End node.",
+            inputSchema={
+                "type": "object",
+                "required": ["pool_id", "target_end_node_id", "type", "session_id"],
+                "properties": {
+                    "pool_id": {"type": "string"},
+                    "target_end_node_id": {"type": "string"},
+                    "type": {"type": "string"},
+                    "session_id": {"type": "string"},
+                    "scope": {
+                        "type": ["string", "null"],
+                        "description": "Sub-scope identifier for the Pool (optional; defaults to top-level).",
+                    },
+                    "text": {"type": "string", "description": "Optional override of Pool item text."},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="pool_drop",
+            title="Pool: drop item",
+            description="Mark a Pool item as dropped (= no longer active for elevation).",
+            inputSchema={
+                "type": "object",
+                "required": ["pool_id"],
+                "properties": {
+                    "pool_id": {"type": "string"},
+                    "scope": {
+                        "type": ["string", "null"],
+                        "description": "Sub-scope identifier for the Pool (optional; defaults to top-level).",
+                    },
+                    "reason": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
             name="resolve_hypothesis_branch",
             title="Accept hypothesis (atomic decision)",
             description=(
@@ -608,6 +695,26 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "resolve_branch":
         return tools.resolve_branch(
             storage=storage, arguments=tool_args, now=now, new_id=new_id
+        )
+    if name == "pool_add":
+        scope = tool_args.get("scope") or None
+        return tools.pool_add(
+            storage, scope=scope, arguments=tool_args, now=now
+        )
+    if name == "pool_list":
+        scope = tool_args.get("scope") or None
+        return tools.pool_list(
+            storage, scope=scope, arguments=tool_args, now=now
+        )
+    if name == "pool_elevate":
+        scope = tool_args.get("scope") or None
+        return tools.pool_elevate(
+            storage, scope=scope, arguments=tool_args, now=now
+        )
+    if name == "pool_drop":
+        scope = tool_args.get("scope") or None
+        return tools.pool_drop(
+            storage, scope=scope, arguments=tool_args, now=now
         )
 
     raise ValueError(f"unknown tool: {name}")
