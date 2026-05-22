@@ -1181,3 +1181,99 @@ def test_list_open_nodes_filters_by_state(tmp_db_path):
     )
     ids = {n["id"] for n in result["nodes"]}
     assert ids == {"n_a"}
+
+
+# ---------------------------------------------------------------------------
+# State machine tools: mark_reached / dump_persist / delete / force_delete
+# ---------------------------------------------------------------------------
+
+
+def _seed_min_subgraph(storage: Storage) -> None:
+    """Set up scope/session/root + Start/End for the state-machine tests."""
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1",
+                           node_type="start", text="s",
+                           parent_id="r1",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1",
+                           node_type="end", text="e",
+                           parent_id="n_s",
+                           paired_for="n_s", achievement_conditions="done",
+                           now="2026-05-22T00:00:00Z")
+
+
+def test_mark_reached_tool(tmp_db_path: str) -> None:
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    _seed_min_subgraph(storage)
+    result = tools.mark_reached(
+        storage,
+        arguments={"session_id": "ses_1", "end_node_id": "n_e"},
+        now="2026-05-22T01:00:00Z",
+    )
+    assert result["end_node"]["state"] == "closed"
+
+
+def test_dump_persist_tool(tmp_db_path: str) -> None:
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    _seed_min_subgraph(storage)
+    tools.mark_reached(storage,
+                       arguments={"session_id": "ses_1", "end_node_id": "n_e"},
+                       now="2026-05-22T01:00:00Z")
+    tools.dump_persist(storage,
+                       arguments={"session_id": "ses_1",
+                                  "start_node_id": "n_s",
+                                  "destination": "/tmp/dump.md"},
+                       now="2026-05-22T02:00:00Z")
+    for nid in ("n_s", "n_e"):
+        node = storage.get_node(session_id="ses_1", node_id=nid)
+        assert node["state"] == "deletable"
+
+
+def test_delete_tool_removes_subgraph(tmp_db_path: str) -> None:
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    _seed_min_subgraph(storage)
+    tools.mark_reached(storage,
+                       arguments={"session_id": "ses_1", "end_node_id": "n_e"},
+                       now="2026-05-22T01:00:00Z")
+    tools.dump_persist(storage,
+                       arguments={"session_id": "ses_1",
+                                  "start_node_id": "n_s",
+                                  "destination": None},
+                       now="2026-05-22T02:00:00Z")
+    tools.delete(storage,
+                 arguments={"session_id": "ses_1", "start_node_id": "n_s"},
+                 now="2026-05-22T03:00:00Z")
+    assert storage.get_node(session_id="ses_1", node_id="n_s") is None
+    assert storage.get_node(session_id="ses_1", node_id="n_e") is None
+
+
+def test_delete_rejects_non_deletable_state(tmp_db_path: str) -> None:
+    """`delete` must require subgraph state='deletable' (pre-flight check)."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    _seed_min_subgraph(storage)
+    with pytest.raises(ValueError, match="deletable"):
+        tools.delete(storage,
+                     arguments={"session_id": "ses_1", "start_node_id": "n_s"},
+                     now="2026-05-22T01:00:00Z")
+
+
+def test_force_delete_node_tool(tmp_db_path: str) -> None:
+    """Single-node force delete bypasses state preconditions."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    _seed_min_subgraph(storage)
+    # Force delete the End node first (paired_for FK constraint requires End → Start order on delete)
+    tools.force_delete(storage,
+                       arguments={"session_id": "ses_1", "node_id": "n_e"},
+                       now="2026-05-22T01:00:00Z")
+    assert storage.get_node(session_id="ses_1", node_id="n_e") is None
+    # Start node still exists
+    assert storage.get_node(session_id="ses_1", node_id="n_s") is not None

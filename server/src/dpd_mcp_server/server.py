@@ -620,6 +620,78 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="mark_reached",
+            title="Mark End node reached",
+            description="Signal End node achievement → transitions subgraph to closed state.",
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "end_node_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "end_node_id": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="dump_persist",
+            title="Dump persist subgraph",
+            description="Transition closed subgraph to deletable; record optional dump destination path.",
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "start_node_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "start_node_id": {"type": "string"},
+                    "destination": {
+                        "type": ["string", "null"],
+                        "description": "Optional file path where the subgraph was (or will be) dumped.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="delete",
+            title="Delete subgraph",
+            description="Physically delete a subgraph (requires state=deletable).",
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "start_node_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "start_node_id": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="force_delete",
+            title="Force delete node",
+            description="Single-node force delete bypassing state precondition (emergency / cleanup only).",
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "node_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "node_id": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
             name="resolve_hypothesis_branch",
             title="Accept hypothesis (atomic decision)",
             description=(
@@ -729,6 +801,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.resolve_branch(
             storage=storage, arguments=tool_args, now=now, new_id=new_id
         )
+    if name == "mark_reached":
+        return tools.mark_reached(storage, arguments=tool_args, now=now)
+    if name == "dump_persist":
+        return tools.dump_persist(storage, arguments=tool_args, now=now)
+    if name == "delete":
+        return tools.delete(storage, arguments=tool_args, now=now)
+    if name == "force_delete":
+        return tools.force_delete(storage, arguments=tool_args, now=now)
     if name == "pool_add":
         scope = tool_args.get("scope") or None
         return tools.pool_add(

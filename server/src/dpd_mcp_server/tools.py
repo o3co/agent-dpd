@@ -697,6 +697,72 @@ def pool_drop(
     return {"pool_id": pool_id_, "dropped_at": now}
 
 
+def mark_reached(
+    storage: Storage,
+    *,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Signal End node achievement; transitions subgraph to closed state."""
+    session_id = arguments["session_id"]
+    end_node_id = arguments["end_node_id"]
+    storage.mark_reached(session_id=session_id, end_node_id=end_node_id, now=now)
+    end = storage.get_node(session_id=session_id, node_id=end_node_id)
+    return {"end_node": dict(end)}
+
+
+def dump_persist(
+    storage: Storage,
+    *,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Transition closed subgraph to deletable; record optional dump destination."""
+    session_id = arguments["session_id"]
+    start_node_id = arguments["start_node_id"]
+    destination = arguments.get("destination")
+    storage.dump_persist_subgraph(
+        session_id=session_id, start_node_id=start_node_id,
+        destination=destination, now=now,
+    )
+    return {"start_node_id": start_node_id, "destination": destination}
+
+
+def delete(
+    storage: Storage,
+    *,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Physically delete a subgraph (requires state=deletable)."""
+    session_id = arguments["session_id"]
+    start_node_id = arguments["start_node_id"]
+    start = storage.get_node(session_id=session_id, node_id=start_node_id)
+    if start is None or start["state"] != "deletable":
+        raise ValueError(
+            f"subgraph start {start_node_id!r} is not in deletable state"
+        )
+    storage.delete_subgraph(
+        session_id=session_id, start_node_id=start_node_id, now=now,
+    )
+    return {"start_node_id": start_node_id, "deleted_at": now}
+
+
+def force_delete(
+    storage: Storage,
+    *,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Single-node force delete bypassing state precondition (emergency/cleanup only)."""
+    session_id = arguments["session_id"]
+    node_id_ = arguments["node_id"]
+    storage.force_delete_node(
+        session_id=session_id, node_id=node_id_, now=now,
+    )
+    return {"node_id": node_id_, "force_deleted_at": now}
+
+
 def _required(arguments: dict[str, Any], key: str) -> Any:
     value = arguments.get(key)
     if value is None or value == "":
