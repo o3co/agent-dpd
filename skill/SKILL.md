@@ -134,13 +134,13 @@ The `resolve_hypothesis_branch` tool encodes the most common closure pattern: ta
 | `list_sessions(scope?)` | List sessions for sub-scope (most recent first) |
 | `get_session_state(session_id)` | Session + active_roots + focus_node |
 | `spawn_root(session_id, topic, reason?)` | Create new root topic → `{root: {...}}` (full row) |
-| `add_node(session_id, parent_id, type, text)` | Add child node under root or node → `{node: {...}}` (full row) |
+| `add_node(session_id, parent_id, type, text, paired_for?, achievement_conditions?)` | Add child node under root or node → `{node: {...}}` (full row). `type` includes `start`/`end` in addition to vocab below. End nodes require `paired_for=<start_node_id>`; `achievement_conditions` is optional for both. |
 | `close_node(session_id, node_id, closure_reason)` | Mark resolved/rejected/invalidated |
 | `resolve_hypothesis_branch(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + auto-insert `derived_from` edge (decision → accepted hypothesis) + insert rationale (if any) |
 | `resolve_branch(session_id, parent_id, parent_kind, results, decision_text?, rationale_text?, derived_from_node_ids?)` | Atomically close N sibling nodes with per-node closure_reason, optionally adding decision + rationale + provenance edges. Generic counterpart to `resolve_hypothesis_branch` (which is locked to select-1-of-N) |
-| `set_focus(session_id, node_id?)` | Set/clear `focus_node_id`. Pass `node_id=null` to clear |
+| `set_focus(session_id, node_id?)` | Set/clear `focus_node_id`. `node_id` may be a regular node or a root_id. Pass `node_id=null` to clear. |
 | `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred` |
-| `list_open_nodes(session_id, root_id?)` | Open nodes in session (or within one root's subtree) |
+| `list_open_nodes(session_id, root_id?, state?)` | Open nodes in session (or within one root's subtree). `state` filter narrows by node state string. |
 | `add_edge(session_id, from_node, to_node, type, reason?)` | Insert a free-form-typed edge between nodes |
 | `list_edges(session_id, from_node?, to_node?, type?)` | List edges (optional from/to/type filters, AND'd) |
 | `list_unblocked_open_nodes(session_id, root_id?, blocker_edge_type?)` | Open nodes that no open node is blocking via the given edge type (default 'blocks') |
@@ -149,6 +149,14 @@ The `resolve_hypothesis_branch` tool encodes the most common closure pattern: ta
 | `get_node(session_id, node_id)` | Fetch single node |
 | `walk_subtree(session_id, root_id)` | All descendants of root (pre-order) |
 | `list_active_roots(session_id)` | Roots with lifecycle=active |
+| `pool_add(text, scope?, tags?, origin_session_id?)` | Append raw thought to scope's Pool (auto-creates scope_root if needed) |
+| `pool_list(active_only?=true, scope?)` | List Pool items for scope |
+| `pool_elevate(pool_id, target_end_node_id, type, session_id, text?, scope?)` | Elevate Pool item to DPD subgraph as child of End node |
+| `pool_drop(pool_id, reason?, scope?)` | Mark Pool item dropped |
+| `mark_reached(session_id, end_node_id)` | Signal End achievement → server verifies Start→End connectivity and transitions subgraph to closed |
+| `dump_persist(session_id, start_node_id, destination?)` | Record externalization of a closed subgraph → transitions to deletable |
+| `delete(session_id, start_node_id)` | Physical delete of a deletable subgraph |
+| `force_delete(session_id, node_id)` | Single-node force delete (emergency use only) |
 
 ## Edge type vocabulary
 
@@ -162,6 +170,8 @@ Documented edge types and their direction conventions:
 | `qualifies` | qualifier → qualified | Finding limits or scopes a target decision without overturning it |
 | `invalidates` | invalidator → invalidated | Finding shows a target decision's premise no longer holds |
 | `blocks` | blocker → blocked | Dependency: blocker must close before blocked can be addressed |
+| `contributes_to` | contributor → End | Explicit semantic justification anchor for an End node (optional; see spec §3) |
+| `supersedes` | new → old | New subgraph supersedes an older one (monotonic forward-only state machine) |
 
 **Direction rule**: from-side is the "active" side (supporting, contradicting, qualifying, deriving); to-side is the target. This matches `storage.py:457-463` for `derived_from` (`from=decision, to=hypothesis`).
 
@@ -227,6 +237,20 @@ list_edges(session_id, type="contradicts")
 ```
 
 Combine with `to_node=<decision_id>` to find dissent against a specific decision.
+
+## v0.3 lifecycle (Pool → DPD → state machine)
+
+DPD v0.3 introduces a 2-phase model: AI free-thinking output is staged in **Pool**
+(`pool_add`), then elevated to the DPD subgraph (`pool_elevate`) once a goal (End)
+becomes clear. Each subgraph has a **Start** (entry point) and **End** (goal anchor,
+`paired_for`-linked to Start). The state machine is monotonic forward-only:
+`active → archived → closed → deletable → gone`. Use `mark_reached(end_node_id)` to
+signal End achievement (server verifies Start→End connectivity), `dump_persist` to
+record externalization, `delete` to physically remove. The `contributes_to` and
+`supersedes` edges express semantic relationships not captured by parent_id alone.
+
+Full per-turn judgment prompts (Pool elevate decisions, End surface, tangent catch)
+are deferred to v0.3.1. See `docs/dpd-v0.3-draft.md` §§3-5 for the full spec.
 
 ## Tone
 
