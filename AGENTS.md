@@ -1,7 +1,5 @@
 # AGENTS.md — DPD repository
 
-[日本語](AGENTS.ja.md)
-
 Development guidelines for AI coding assistants (Claude, Cursor, Copilot, …) and human contributors working on this repo. Read this file before making changes.
 
 ## Project overview
