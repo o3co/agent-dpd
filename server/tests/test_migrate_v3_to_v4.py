@@ -208,3 +208,109 @@ def test_migrate_is_idempotent(tmp_db_path: str) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     assert version == 4
     conn.close()
+
+
+def test_migration_rolls_back_on_partial_failure(tmp_db_path: str) -> None:
+    """If migration fails mid-way, DB is rolled back to v3 state.
+
+    Triggers failure by injecting a v3 row whose ``closure_reason`` violates a
+    v4 CHECK constraint. The migration's INSERT INTO nodes_v4 SELECT raises
+    IntegrityError after several ALTER TABLE statements have already executed.
+    Verifies that explicit BEGIN ... COMMIT atomicity rolls back the prior
+    DDL — without it (Python sqlite3 legacy mode auto-commits DDL), the
+    sessions.mode / pool_items.rejected_* columns would persist with
+    user_version still 3, leaving the database unrecoverable on next open.
+    """
+    import pytest
+
+    _seed_v3_db(tmp_db_path)
+    _downgrade_to_v3(tmp_db_path)
+
+    # Inject a v3 row that violates v4 CHECK (closure_reason IN
+    # ('resolved','rejected','invalidated')). v3 nodes table (rebuilt by
+    # _downgrade_to_v3) intentionally has no CHECK on closure_reason, so the
+    # bogus value sits there until the v4 migration's INSERT trips on it.
+    conn = sqlite3.connect(tmp_db_path)
+    conn.execute(
+        "UPDATE nodes SET closure_reason = 'bogus_value' WHERE id = 'node_1'"
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        migrate(db_path=tmp_db_path)
+
+    # Verify DB rolled back to v3 state — no half-applied changes.
+    conn = sqlite3.connect(tmp_db_path)
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 3, (
+            f"user_version should remain 3 after rollback, got {version}"
+        )
+
+        ses_cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+        assert "mode" not in ses_cols, (
+            f"sessions.mode should not persist after rollback, cols={ses_cols}"
+        )
+
+        pool_cols = {r[1] for r in conn.execute("PRAGMA table_info(pool_items)")}
+        for col in ("rejected_at", "rejected_reason", "text_hash"):
+            assert col not in pool_cols, (
+                f"pool_items.{col} should not persist after rollback, cols={pool_cols}"
+            )
+
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "nodes_v4" not in tables, (
+            f"orphan nodes_v4 must not persist after rollback, tables={tables}"
+        )
+
+        node_cols = {r[1] for r in conn.execute("PRAGMA table_info(nodes)")}
+        assert "provenance" not in node_cols, (
+            f"nodes.provenance should not persist after rollback, cols={node_cols}"
+        )
+    finally:
+        conn.close()
+
+
+def test_cli_entry_point_migrates_db(
+    tmp_db_path: str, capsys
+) -> None:
+    """`python -m dpd_mcp_server.migrate_v3_to_v4 <db>` actually invokes migrate().
+
+    Regression guard: prior to v0.3.1 the module had no ``__main__`` block, so
+    the documented CLI silently no-op'd. This test invokes _cli() with the
+    same argv form as ``python -m`` to verify the migration is executed.
+    """
+    from dpd_mcp_server.migrate_v3_to_v4 import _cli
+
+    _seed_v3_db(tmp_db_path)
+    _downgrade_to_v3(tmp_db_path)
+
+    # Simulate `python -m dpd_mcp_server.migrate_v3_to_v4 <db_path>`.
+    rc = _cli(["dpd_mcp_server.migrate_v3_to_v4", tmp_db_path])
+    assert rc == 0
+
+    conn = sqlite3.connect(tmp_db_path)
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 4
+    finally:
+        conn.close()
+
+    captured = capsys.readouterr()
+    assert "Migrated" in captured.out
+
+
+def test_cli_entry_point_usage_error(capsys) -> None:
+    """`python -m dpd_mcp_server.migrate_v3_to_v4` (no args) prints usage + exit 2."""
+    from dpd_mcp_server.migrate_v3_to_v4 import _cli
+
+    rc = _cli(["dpd_mcp_server.migrate_v3_to_v4"])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "Usage" in captured.err

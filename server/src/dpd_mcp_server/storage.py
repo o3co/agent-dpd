@@ -1013,6 +1013,7 @@ class Storage:
         origin_turn: str | None,
         tags: str | None,
         now: str,
+        text_hash: str | None = None,
     ) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -1020,11 +1021,11 @@ class Storage:
                 INSERT INTO pool_items
                     (id, scope_root_id, origin_session_id, text,
                      origin_turn, created_at, elevated_to, elevated_at,
-                     dropped_at, tags)
-                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?)
+                     dropped_at, tags, text_hash)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
                 """,
                 (pool_id, scope_root_id, origin_session_id, text,
-                 origin_turn, now, tags),
+                 origin_turn, now, tags, text_hash),
             )
 
     def list_pool_items(
@@ -1476,39 +1477,30 @@ class Storage:
         """Atomically import a multi-node + edge subgraph under an existing root.
 
         Algorithm:
-        1. Validate root_id exists in this session.
-        2. Build a dependency graph from the nodes list (parent_id → child).
-        3. Topological sort to determine insert order (parents before children).
-        4. Detect cycles — raise ValueError if any cycle is found.
-        5. Pre-flight: validate all parent_id / paired_for refs resolve to one of:
-           - root_id
-           - Another id in the nodes list
-           - A pre-existing node id in DB (checked inside the transaction)
-        6. Within a single transaction:
-           a. INSERT nodes in topo order (parent always inserted before child).
-           b. INSERT edges (from/to must exist in DB at this point).
-        7. Return all inserted rows.
+        1. Build a dependency graph from the nodes list (parent_id → child).
+        2. Topological sort to determine insert order (parents before children).
+        3. Detect cycles — raise ValueError if any cycle is found.
+        4. Within a single transaction:
+           a. Validate root_id exists in this session.
+           b. Pre-flight + INSERT nodes in topo order. For each node:
+              - parent_id resolves (root_id / inserted earlier in batch /
+                pre-existing in DB) AND parent_kind matches the actual table
+                where parent_id was found.
+              - paired_for resolves (in batch or pre-existing).
+           c. INSERT edges (from/to must exist at this point).
+        5. Return all inserted rows.
 
         Raises ValueError for:
           - root_id not found in session
           - Cycle in parent_id chain
-          - parent_id / paired_for ref that doesn't resolve
+          - parent_id ref that doesn't resolve
+          - parent_kind mismatch with actual parent table
+          - paired_for ref that doesn't resolve
           - edge endpoint that doesn't resolve
-          - Duplicate node id in import set (sqlite3.IntegrityError → ValueError)
+          - Duplicate node id in import set
+          - Insert-time IntegrityError (sqlite3.IntegrityError → ValueError)
         """
-        # Step 1: validate root_id
-        with self.connect() as conn:
-            root_row = conn.execute(
-                "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
-                (session_id, root_id),
-            ).fetchone()
-        if root_row is None:
-            raise ValueError(
-                f"root_id {root_id!r} not found in session {session_id!r}"
-            )
-
-        # Step 2 & 3 & 4: topological sort with cycle detection
-        # Build a map of id → node spec and adjacency list (parent → [children]).
+        # Steps 1-3: topological sort with cycle detection (pure Python, no DB).
         # Detect duplicate ids first.
         seen_ids: set[str] = set()
         for node in nodes:
@@ -1548,14 +1540,23 @@ class Storage:
                 "cycle detected in parent_id chain within imported nodes"
             )
 
-        # Step 5 & 6: single transaction — insert nodes then edges
+        # Step 4: single transaction — root validation + node + edge inserts.
+        # Root validation is INSIDE the tx so a concurrent root delete between
+        # validation and insert cannot create a phantom root reference.
         import sqlite3 as _sqlite3
 
         with self.connect() as conn:
-            # Track ids that are now available as parents (inserted or pre-existing).
-            # Pre-check: root_id is a valid reference.
-            # We'll validate each node's parent_id at insert time within the tx.
+            # Step 4a: validate root_id (inside the import tx).
+            root_row = conn.execute(
+                "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                (session_id, root_id),
+            ).fetchone()
+            if root_row is None:
+                raise ValueError(
+                    f"root_id {root_id!r} not found in session {session_id!r}"
+                )
 
+            # Track ids that are now available as parents (inserted or pre-existing).
             inserted_node_ids: set[str] = set()
 
             for nid in topo_order:
@@ -1567,29 +1568,45 @@ class Storage:
                 node_type = node["type"]
                 text = node["text"]
 
-                # Validate parent_id resolves.
+                # Validate parent_id resolves AND parent_kind matches actual
+                # parent table. Mismatched parent_kind would silently create
+                # invisible nodes — walk_subtree filters children by both
+                # parent_id AND parent_kind, so a wrong kind detaches the node
+                # from normal tree traversal.
                 if pid is None:
                     raise ValueError(
                         f"node {nid!r}: parent_id is required"
                     )
                 if pid in inserted_node_ids:
-                    # Already inserted in this batch
-                    pass
+                    expected_kind: str = "node"
                 elif pid == root_id:
-                    pass
+                    expected_kind = "root"
                 else:
-                    # Must be a pre-existing node or root in DB
-                    existing = conn.execute(
-                        "SELECT 1 FROM nodes WHERE session_id = ? AND id = ? "
-                        "UNION ALL "
-                        "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
-                        (session_id, pid, session_id, pid),
+                    # Pre-existing in DB: check both tables to determine kind.
+                    node_exists = conn.execute(
+                        "SELECT 1 FROM nodes WHERE session_id = ? AND id = ?",
+                        (session_id, pid),
                     ).fetchone()
-                    if existing is None:
-                        raise ValueError(
-                            f"node {nid!r}: parent_id {pid!r} not found "
-                            f"in import set or DB"
-                        )
+                    if node_exists is not None:
+                        expected_kind = "node"
+                    else:
+                        root_exists = conn.execute(
+                            "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
+                            (session_id, pid),
+                        ).fetchone()
+                        if root_exists is not None:
+                            expected_kind = "root"
+                        else:
+                            raise ValueError(
+                                f"node {nid!r}: parent_id {pid!r} not found "
+                                f"in import set or DB"
+                            )
+
+                if pkind != expected_kind:
+                    raise ValueError(
+                        f"node {nid!r}: declared parent_kind={pkind!r} but "
+                        f"parent {pid!r} is actually a {expected_kind!r}"
+                    )
 
                 # Validate paired_for resolves.
                 if paired_for is not None:

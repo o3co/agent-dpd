@@ -5,10 +5,14 @@ Existing v0.2 nodes are re-parented to their Start node; old root rows
 are retained for historical reference with migrated_to_start_id set.
 
 Idempotent: running twice is a no-op for already-migrated rows.
+
+CLI: ``python -m dpd_mcp_server.migrate_v2_to_v3 path/to/db.sqlite``
 """
 from __future__ import annotations
 
 import sqlite3
+import sys
+from datetime import datetime, timezone
 
 from .ids import root_id as _new_root_id, node_id as _new_node_id
 
@@ -104,3 +108,22 @@ def migrate(*, db_path: str, now: str) -> None:
         raise
     finally:
         conn.close()
+
+
+def _cli(argv: list[str]) -> int:
+    """Command-line entry: ``python -m dpd_mcp_server.migrate_v2_to_v3 <db_path>``."""
+    if len(argv) != 2:
+        print(
+            "Usage: python -m dpd_mcp_server.migrate_v2_to_v3 <db_path>",
+            file=sys.stderr,
+        )
+        return 2
+    db_path = argv[1]
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    migrate(db_path=db_path, now=now)
+    print(f"Migrated {db_path} to v0.3 (user_version=3)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli(sys.argv))

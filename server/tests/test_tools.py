@@ -1086,6 +1086,54 @@ def test_pool_add_creates_scope_root_if_missing(tmp_db_path):
     assert len(items["items"]) == 1
 
 
+def test_pool_add_populates_text_hash(tmp_db_path):
+    """pool_add stores canonical text_hash per spec §4.6.1.
+
+    Hash = SHA-256(lower(strip(text)))[:16]. Tests:
+    - hash is populated (non-NULL, 16 hex chars)
+    - same canonical form → same hash (case + whitespace insensitive)
+    - distinct text → distinct hash
+    """
+    import hashlib
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+
+    r1 = tools.pool_add(
+        storage, scope="dpd",
+        arguments={"text": "  Observation X  "},
+        now="2026-05-22T00:00:00Z",
+    )
+    r2 = tools.pool_add(
+        storage, scope="dpd",
+        arguments={"text": "observation x"},  # same canonical form
+        now="2026-05-22T00:00:01Z",
+    )
+    r3 = tools.pool_add(
+        storage, scope="dpd",
+        arguments={"text": "Different observation"},
+        now="2026-05-22T00:00:02Z",
+    )
+
+    h1 = r1["pool_item"]["text_hash"]
+    h2 = r2["pool_item"]["text_hash"]
+    h3 = r3["pool_item"]["text_hash"]
+
+    # populated, correct length
+    assert h1 is not None
+    assert len(h1) == 16
+    assert all(c in "0123456789abcdef" for c in h1)
+
+    # canonical equivalence (case + whitespace)
+    assert h1 == h2, f"expected same hash for canonical-equivalent text, got {h1!r} vs {h2!r}"
+
+    # distinct text → distinct hash
+    assert h1 != h3
+
+    # matches spec formula
+    expected = hashlib.sha256(b"observation x").hexdigest()[:16]
+    assert h1 == expected
+
+
 def test_pool_elevate_links_to_node(tmp_db_path):
     from dpd_mcp_server import tools
     storage = Storage.open(tmp_db_path)
@@ -2277,6 +2325,56 @@ def test_bulk_import_unknown_root_raises(tmp_db_path: str) -> None:
             arguments={"session_id": sid, "root_id": "ghost_root", "nodes": nodes, "edges": []},
             now="2026-05-22T10:01:00Z",
         )
+
+
+def test_bulk_import_rejects_parent_kind_mismatch_root(tmp_db_path: str) -> None:
+    """parent_id is root but parent_kind='node' → ValueError (silent corruption guard).
+
+    Without this validation, walk_subtree (which filters children by both
+    parent_id AND parent_kind) would not see this node, leaving it invisible
+    from normal tree traversal.
+    """
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        # parent_id=root but parent_kind='node' — mismatch
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+    ]
+    with pytest.raises(ValueError, match="parent_kind"):
+        t.bulk_import_subgraph(
+            storage=storage,
+            arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+            now="2026-05-22T10:01:00Z",
+        )
+
+    # Verify no nodes inserted (rollback).
+    rows = storage.list_open_nodes(session_id=sid)
+    assert len(rows) == 0
+
+
+def test_bulk_import_rejects_parent_kind_mismatch_node(tmp_db_path: str) -> None:
+    """parent_id is a node but parent_kind='root' → ValueError."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        # n2 declares parent_id=n1 (a node) but parent_kind='root'
+        {"id": "n2", "type": "hypothesis", "text": "H", "parent_id": "n1", "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+    ]
+    with pytest.raises(ValueError, match="parent_kind"):
+        t.bulk_import_subgraph(
+            storage=storage,
+            arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": []},
+            now="2026-05-22T10:01:00Z",
+        )
+
+    # Verify no nodes inserted (rollback — n1 should NOT persist either).
+    rows = storage.list_open_nodes(session_id=sid)
+    assert len(rows) == 0
 
 
 # ---------------------------------------------------------------------------

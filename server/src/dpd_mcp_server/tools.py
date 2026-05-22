@@ -605,6 +605,18 @@ def export_yaml(
     return {"yaml": _json.dumps(payload, indent=2, ensure_ascii=False)}
 
 
+def _compute_pool_text_hash(text: str) -> str:
+    """SHA-256 of ``lower(strip(text))`` truncated to 16 hex chars.
+
+    Canonical text hash for Pool item identity (spec v0.3.1 §4.6.1).
+    Used to suppress re-detection of the same observation after a user
+    rejects a proposed update.
+    """
+    import hashlib
+    canonical = text.strip().lower().encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()[:16]
+
+
 def pool_add(
     storage: Storage,
     *,
@@ -614,7 +626,9 @@ def pool_add(
 ) -> dict[str, Any]:
     """Append a raw thought to the scope's Pool.
 
-    Auto-creates scope_root if missing for this scope.
+    Auto-creates scope_root if missing for this scope. Populates
+    ``text_hash`` per spec §4.6.1 so reject-suppression matching can compare
+    against the canonical-form hash without re-computing it.
     """
     from .ids import pool_id as _pool_id
     text = arguments["text"]
@@ -623,10 +637,12 @@ def pool_add(
     origin_turn = arguments.get("origin_turn")
     root = storage.get_or_create_scope_root(scope=scope, now=now)
     new_id_ = _pool_id()
+    text_hash = _compute_pool_text_hash(text)
     storage.insert_pool_item(
         pool_id=new_id_, scope_root_id=root["id"],
         text=text, origin_session_id=origin_session_id,
-        origin_turn=origin_turn, tags=tags, now=now,
+        origin_turn=origin_turn, tags=tags,
+        text_hash=text_hash, now=now,
     )
     items = storage.list_pool_items(scope_root_id=root["id"], active_only=False)
     item = next((dict(r) for r in items if r["id"] == new_id_), None)
