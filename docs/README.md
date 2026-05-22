@@ -1,5 +1,7 @@
-# dpd / docs — Spec
+# dpd / docs
 
-Protocol specification. Files going forward are versioned as `dpd-v<N.M>.md` (pinned) and `dpd-v<N.M>-draft.md` (current state). Historical drafts (v0.1 / v0.2, PRGP era) retain the `prgp-` prefix.
+[日本語](README.ja.md)
 
-The current spec draft lives in the **agent scope** at `scopes/decompose-propagate.protocol/docs/prgp-v0.2-draft.md` and will graduate here once stable. Until graduation, this directory holds only Architecture Decision Records (ADRs) and supplementary notes.
+Supplementary documentation: ADRs, release notes (when applicable), and the implementation-level specification (once it graduates from upstream).
+
+The **user-facing readable spec** lives in the top-level [`README.md`](../README.md). The **implementation-level dev spec** (DDL, error codes, state machine tables) currently lives upstream in the agent scope; graduation into this directory is planned. Ask the maintainers if you need it for non-trivial contribution work.
