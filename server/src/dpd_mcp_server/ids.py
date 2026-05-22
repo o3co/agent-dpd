@@ -18,3 +18,8 @@ def root_id() -> str:
 def pool_id() -> str:
     """Return a pool item identifier: ``pool_<8 hex chars>``."""
     return f"pool_{secrets.token_hex(4)}"
+
+
+def node_id() -> str:
+    """Return a node identifier: ``node_<8 hex chars>``."""
+    return f"node_{secrets.token_hex(4)}"
