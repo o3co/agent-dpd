@@ -1152,6 +1152,8 @@ class Storage:
         """Physical delete for a subgraph in `deletable` state.
 
         Cleans up edges that reference any node in the subgraph (from either side).
+        Nulls out `paired_for` FK references within the subgraph before deletion
+        so the bulk DELETE does not violate intra-subgraph FK constraints.
         """
         with self.connect() as conn:
             members = self._subgraph_node_ids(
@@ -1165,6 +1167,27 @@ class Storage:
                   AND (from_node IN ({placeholders}) OR to_node IN ({placeholders}))
                 """,
                 (session_id, *members, *members),
+            )
+            # Null out paired_for references within the subgraph to avoid FK
+            # constraint violations when the referenced Start node is deleted
+            # in the same batch as the End node that references it.
+            conn.execute(
+                f"""
+                UPDATE nodes SET paired_for = NULL
+                WHERE session_id = ? AND id IN ({placeholders})
+                  AND paired_for IN ({placeholders})
+                """,
+                (session_id, *members, *members),
+            )
+            # Null out pool_items.elevated_to FK references pointing into this
+            # subgraph — pool items that were elevated into this subgraph must
+            # have their back-pointer cleared before the node rows are removed.
+            conn.execute(
+                f"""
+                UPDATE pool_items SET elevated_to = NULL
+                WHERE elevated_to IN ({placeholders})
+                """,
+                (*members,),
             )
             conn.execute(
                 f"DELETE FROM nodes WHERE session_id = ? AND id IN ({placeholders})",
