@@ -53,6 +53,25 @@ class Storage:
             with sqlite3.connect(db_path) as conn:
                 conn.execute("PRAGMA busy_timeout = 5000")
                 cls._migrate_v2_to_v3(conn)
+                # pool_items was introduced in v3 schema.sql.  A genuine v2 DB
+                # has no pool_items table yet, so we create it here (v3 shape,
+                # without rejected_* columns) so that _migrate_v3_to_v4 can
+                # safely run its ALTER TABLE pool_items ADD COLUMN statements.
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS pool_items (
+                        id                TEXT PRIMARY KEY,
+                        scope_root_id     TEXT NOT NULL REFERENCES roots(id),
+                        origin_session_id TEXT REFERENCES sessions(id),
+                        text              TEXT NOT NULL,
+                        origin_turn       TEXT,
+                        created_at        TEXT NOT NULL,
+                        elevated_to       TEXT REFERENCES nodes(id),
+                        elevated_at       TEXT,
+                        dropped_at        TEXT,
+                        tags              TEXT
+                    )
+                """)
+            _migrate_v3_to_v4(db_path=db_path)
         elif pre_schema_version == 3:
             _migrate_v3_to_v4(db_path=db_path)
 

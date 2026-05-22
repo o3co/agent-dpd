@@ -2321,11 +2321,15 @@ def test_v4_nodes_has_provenance_with_check(tmp_db_path: str) -> None:
     with storage.connect() as conn:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)")}
         assert "provenance" in cols
-        # CHECK constraint should reject invalid value
-        with pytest.raises(sqlite3.IntegrityError):
+        # CHECK constraint should reject invalid provenance value.
+        # All other NOT NULL columns are satisfied so the IntegrityError must
+        # come from the CHECK constraint, not a missing NOT NULL column.
+        with pytest.raises(sqlite3.IntegrityError, match=r"CHECK constraint failed"):
             conn.execute(
-                "INSERT INTO nodes (id, session_id, type, text, provenance, state) "
-                "VALUES ('node_test', 'ses_test', 'question', 't', 'invalid_provenance', 'active')"
+                "INSERT INTO nodes (id, session_id, type, text, provenance, status, "
+                "parent_id, parent_kind, created_at, updated_at, state) "
+                "VALUES ('node_test', 'ses_test', 'question', 't', 'invalid_provenance', "
+                "'open', 'root_1', 'root', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'active')"
             )
 
 
@@ -2343,3 +2347,68 @@ def test_v4_pool_rejected_index_exists(tmp_db_path: str) -> None:
             "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_pool_rejected'"
         ).fetchone()
     assert idx is not None
+
+
+def test_storage_open_migrates_v2_to_v4_schema(tmp_db_path: str) -> None:
+    """Storage.open() on a v2-shaped DB must auto-migrate all the way to v4.
+
+    Regression test for the broken v2→v4 migration chain: before the fix,
+    only v2→v3 ran, leaving nodes.provenance and sessions.mode absent even
+    though user_version was stamped as 4 by schema.sql.
+
+    This test FAILS before the fix (Issue 1) and PASSES after.
+    """
+    # Seed a v2-shaped DB (no v3 columns, no v4 columns).
+    conn = sqlite3.connect(tmp_db_path)
+    conn.executescript("""
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, scope TEXT, label TEXT,
+            started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            focus_node_id TEXT
+        );
+        CREATE TABLE roots (
+            id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            lifecycle TEXT NOT NULL CHECK (lifecycle IN ('active','archived','deferred')),
+            spawned_at TEXT NOT NULL, last_focused_at TEXT
+        );
+        CREATE TABLE nodes (
+            id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            type TEXT NOT NULL, text TEXT NOT NULL,
+            status TEXT NOT NULL, closure_reason TEXT,
+            parent_id TEXT NOT NULL, parent_kind TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            from_node TEXT NOT NULL, to_node TEXT NOT NULL,
+            type TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 2;
+    """)
+    conn.commit()
+    conn.close()
+
+    # Opening must run the full v2→v3→v4 migration chain.
+    storage = Storage.open(tmp_db_path)
+
+    # Assert ALL v4 columns exist after migration.
+    with storage.connect() as conn:
+        node_cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)")}
+        assert "provenance" in node_cols, (
+            "v2→v4 migration chain broken: nodes.provenance missing"
+        )
+
+        session_cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}
+        assert "mode" in session_cols, (
+            "v2→v4 migration chain broken: sessions.mode missing"
+        )
+
+        pool_cols = {r["name"] for r in conn.execute("PRAGMA table_info(pool_items)")}
+        assert "rejected_at" in pool_cols, (
+            "v2→v4 migration chain broken: pool_items.rejected_at missing"
+        )
+
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 4, f"expected user_version=4 after v2→v4 migration, got {version}"

@@ -1,4 +1,4 @@
-"""Migration from v0.3 (user_version=3) to v0.4 schema (user_version=4).
+"""Migration from v0.3 schema (user_version=3) to v0.3.1 schema (user_version=4).
 
 Adds: sessions.mode, pool_items.rejected_at/rejected_reason/text_hash,
 nodes.provenance, idx_pool_rejected partial index.
@@ -13,7 +13,13 @@ from dpd_mcp_server.migrate_v3_to_v4 import migrate
 
 
 def _seed_v3_db(db_path: str) -> None:
-    """Set up a v3-shaped database with one session, one root, and one node."""
+    """Create a fresh v4 DB via Storage.open(), then seed it with one session,
+    one root, one node, and one pool item.
+
+    The resulting DB is in v4 shape.  Callers that need a genuine v3-shaped DB
+    must follow this with ``_downgrade_to_v3(db_path)`` to strip v4 columns and
+    reset user_version to 3.
+    """
     storage = Storage.open(db_path)
     now = "2026-05-22T00:00:00Z"
     with storage.connect() as conn:
