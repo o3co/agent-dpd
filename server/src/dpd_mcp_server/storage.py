@@ -844,17 +844,22 @@ class Storage:
     # v0.3 Task 2: scope_root resolution + pool_items CRUD
     # -----------------------------------------------------------------------
 
-    def get_or_create_scope_root(self, *, scope: str, now: str) -> sqlite3.Row:
+    def get_or_create_scope_root(self, *, scope: str | None, now: str) -> sqlite3.Row:
         """Return the singleton scope_root row for the given scope, creating if absent.
+
+        Top-level scope (scope=None) is stored under the empty-string sentinel ``''``
+        to satisfy the ``CHECK (scope IS NOT NULL)`` constraint when ``scope_root=1``.
+        Callers should pass ``None`` for top-level; storage handles the normalization.
 
         Uses the UNIQUE partial index on (scope) WHERE scope_root=1 to enforce singleton.
         Generated id format: root_<hex8> via ids.root_id().
         """
         from .ids import root_id  # local import: parameter name `root_id` is used elsewhere in this class
+        scope_key = scope if scope is not None else ""
         with self.connect() as conn:
             existing = conn.execute(
                 "SELECT * FROM roots WHERE scope = ? AND scope_root = 1",
-                (scope,),
+                (scope_key,),
             ).fetchone()
             if existing is not None:
                 return existing
@@ -866,7 +871,7 @@ class Storage:
                      spawned_at, last_focused_at)
                 VALUES (?, NULL, ?, 1, ?, 'active', ?, NULL)
                 """,
-                (generated_id, scope, f"{scope} scope root", now),
+                (generated_id, scope_key, f"{scope_key or 'top-level'} scope root", now),
             )
             return conn.execute(
                 "SELECT * FROM roots WHERE id = ?", (generated_id,)

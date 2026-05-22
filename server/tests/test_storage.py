@@ -1992,3 +1992,19 @@ def test_delete_subgraph_removes_nodes_and_edges(tmp_db_path: str) -> None:
                             now="2026-05-22T03:00:00Z")
     assert storage.get_node(session_id="ses_1", node_id="n_s") is None
     assert storage.get_node(session_id="ses_1", node_id="n_e") is None
+
+
+def test_get_or_create_scope_root_top_level_uses_empty_string_sentinel(tmp_db_path: str) -> None:
+    """scope=None should be normalized to empty-string sentinel internally."""
+    storage = Storage.open(tmp_db_path)
+    row = storage.get_or_create_scope_root(scope=None, now="2026-05-22T00:00:00Z")
+    assert row["scope"] == ""
+    assert row["scope_root"] == 1
+
+
+def test_get_or_create_scope_root_top_level_idempotent(tmp_db_path: str) -> None:
+    """Two calls with scope=None should return the same row."""
+    storage = Storage.open(tmp_db_path)
+    r1 = storage.get_or_create_scope_root(scope=None, now="2026-05-22T00:00:00Z")
+    r2 = storage.get_or_create_scope_root(scope=None, now="2026-05-22T01:00:00Z")
+    assert r1["id"] == r2["id"]

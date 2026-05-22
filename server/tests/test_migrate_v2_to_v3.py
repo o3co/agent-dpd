@@ -121,3 +121,28 @@ def test_migrate_is_idempotent(tmp_db_path: str) -> None:
             "SELECT COUNT(*) FROM nodes WHERE type = 'start'"
         ).fetchone()[0]
         assert start_count == 4
+
+
+def test_migrate_archived_lifecycle_sets_timestamps(tmp_db_path: str) -> None:
+    """Old roots with lifecycle='archived' should produce Start nodes with
+    state='closed' AND archived_at/closed_at set."""
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, scope, label, started_at, updated_at) "
+            "VALUES ('ses_1', 'dpd', NULL, '2026-05-20T00:00:00Z', '2026-05-20T00:00:00Z')"
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('r_archived', 'ses_1', 't_arch', 'archived', '2026-05-20T00:00:00Z')"
+        )
+
+    migrate(db_path=tmp_db_path, now="2026-05-22T00:00:00Z")
+
+    with storage.connect() as conn:
+        start = conn.execute(
+            "SELECT * FROM nodes WHERE type = 'start'"
+        ).fetchone()
+        assert start["state"] == "closed"
+        assert start["archived_at"] == "2026-05-22T00:00:00Z"
+        assert start["closed_at"] == "2026-05-22T00:00:00Z"

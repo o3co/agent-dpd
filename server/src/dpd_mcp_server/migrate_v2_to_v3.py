@@ -66,6 +66,8 @@ def migrate(*, db_path: str, now: str) -> None:
                 start_id = _new_node_id()
                 # Map old root.lifecycle → Start node state.
                 state = "closed" if old["lifecycle"] == "archived" else "active"
+                archived_at_value = now if state == "closed" else None
+                closed_at_value = now if state == "closed" else None
                 conn.execute(
                     "INSERT INTO nodes "
                     "(id, session_id, type, text, status, closure_reason, "
@@ -74,9 +76,9 @@ def migrate(*, db_path: str, now: str) -> None:
                     "state, archived_at, closed_at, deletable_at, "
                     "created_at, updated_at) "
                     "VALUES (?, ?, 'start', ?, 'open', NULL, ?, 'root', NULL, "
-                    "NULL, 0, ?, NULL, NULL, NULL, ?, ?)",
+                    "NULL, 0, ?, ?, ?, NULL, ?, ?)",
                     (start_id, old["session_id"], old["topic"], sr_id,
-                     state, now, now),
+                     state, archived_at_value, closed_at_value, now, now),
                 )
                 # Re-parent all direct children of the old root.
                 conn.execute(
