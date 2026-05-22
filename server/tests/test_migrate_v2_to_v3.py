@@ -77,6 +77,35 @@ def test_migrate_creates_scope_root_and_start_nodes(tmp_db_path: str) -> None:
             assert row["parent_id"] in {s["id"] for s in starts}
 
 
+def test_migrate_initializes_state_from_status(tmp_db_path: str) -> None:
+    """v0.2 nodes with status='closed' should have state='closed' after migration.
+    v0.2 nodes with status='open' (or NULL) should have state='active'."""
+    _seed_v2_db(tmp_db_path)
+    # Add an extra closed node manually to seed
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, "
+            "closure_reason, parent_id, parent_kind, created_at, updated_at) "
+            "VALUES ('n_closed', 'ses_1', 'answer', 'a', 'closed', "
+            "'resolved', 'r_1_1', 'root', "
+            "'2026-05-20T00:00:00Z', '2026-05-20T00:00:00Z')"
+        )
+
+    migrate(db_path=tmp_db_path, now="2026-05-22T00:00:00Z")
+
+    with storage.connect() as conn:
+        rows = list(conn.execute(
+            "SELECT id, status, state FROM nodes ORDER BY id"
+        ))
+        # Build a {id: (status, state)} map
+        m = {r["id"]: (r["status"], r["state"]) for r in rows}
+        assert m["n_closed"] == ("closed", "closed"), m["n_closed"]
+        # The 4 v0.2 'question' nodes from _seed_v2_db had status='open'
+        for nid in ("n_1_1", "n_1_2", "n_2_1", "n_2_2"):
+            assert m[nid] == ("open", "active"), (nid, m[nid])
+
+
 def test_migrate_is_idempotent(tmp_db_path: str) -> None:
     """Running migrate twice must not duplicate scope_root or Start nodes."""
     _seed_v2_db(tmp_db_path)

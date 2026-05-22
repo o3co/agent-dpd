@@ -90,6 +90,12 @@ def migrate(*, db_path: str, now: str) -> None:
                     "UPDATE roots SET migrated_to_start_id = ? WHERE id = ?",
                     (start_id, old["id"]),
                 )
+        # Spec §7.2 step 4: initialize state column from status column.
+        # SQLite DEFAULT only fires on INSERT; existing v0.2 rows got 'active'
+        # via ALTER TABLE ADD COLUMN — manually sync from status here.
+        conn.execute(
+            "UPDATE nodes SET state = 'closed' WHERE status = 'closed' AND state = 'active'"
+        )
         conn.commit()
     except Exception:
         conn.rollback()
