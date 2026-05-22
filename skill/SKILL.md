@@ -79,24 +79,32 @@ claude mcp add dpd-mcp-server -- dpd-mcp-server
 Resolve in this priority (first match wins):
 
 1. **Explicit `--scope=<name>` argument**: use verbatim when provided.
-2. **cwd walk-up to `scope.yaml`**: read its `name:` field (not the directory basename).
+2. **cwd walk-up to `.dpdrc`**: read its `scope=<name>` line.
 3. **Fallback**: sub-scope = null (top-level session).
 
-**Note (override priority matters)**: when Claude is launched from a workspace *above* the intended sub-scope (e.g., `/Volumes/Workspace/scopes/mcp/` while wanting to work in `decompose-propagate.protocol`), walk-up alone returns null and silently routes work to top-level. Always pass `--scope=<name>` explicitly in this case.
+**Note (override priority matters)**: when Claude is launched from a workspace *above* the intended sub-scope, walk-up alone returns null and silently routes work to top-level. Always pass `--scope=<name>` explicitly in this case.
 
 ```bash
 # walk-up implementation (only when explicit override absent)
 dir="$(pwd)"
 while [ "$dir" != "/" ]; do
-  if [ -f "$dir/scope.yaml" ]; then
-    name=$(grep -E '^name:[[:space:]]*' "$dir/scope.yaml" | head -1 \
-             | sed 's/^name:[[:space:]]*//; s/[[:space:]]*$//')
-    echo "${name:-$(basename "$dir")}"
-    break
+  if [ -f "$dir/.dpdrc" ]; then
+    name=$(grep -E '^[[:space:]]*scope[[:space:]]*=' "$dir/.dpdrc" | head -1 \
+             | sed 's/^[[:space:]]*scope[[:space:]]*=[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "$name" ] && { echo "$name"; break; }
   fi
   dir="$(dirname "$dir")"
 done
 ```
+
+**`.dpdrc` schema** (minimal — single `scope=<name>` line):
+
+```ini
+# .dpdrc — DPD marker for sub-scope auto-detection
+scope=my-scope-name
+```
+
+Whitespace around `=` is tolerated. Lines starting with `#` are comments. An empty `.dpdrc` (no `scope=` line) is valid and only marks the agent-scope root for the server (see server-side resolution).
 
 ### Step 2: List existing sessions
 

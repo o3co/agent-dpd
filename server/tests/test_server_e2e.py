@@ -12,11 +12,10 @@ import pytest
 
 @pytest.mark.timeout(15)
 def test_full_chain_through_stdio(tmp_path: Path) -> None:
-    # Fake agent scope: directory with Makefile + AGENTS.md markers.
+    # Fake agent scope: directory with .dpdrc marker.
     agent_root = tmp_path / "fake-agent"
     agent_root.mkdir()
-    (agent_root / "Makefile").write_text("# marker")
-    (agent_root / "AGENTS.md").write_text("# marker")
+    (agent_root / ".dpdrc").write_text("scope=test\n")
 
     # Override the data dir via env var so the test does not touch ~/.claude.
     data_dir = tmp_path / "dpd-data"
@@ -215,8 +214,7 @@ def test_resolve_branch_through_stdio(tmp_path: Path) -> None:
     """Smoke-test resolve_branch: all-true verdict + decision + derived_from edges."""
     agent_root = tmp_path / "fake-agent"
     agent_root.mkdir()
-    (agent_root / "Makefile").write_text("# marker")
-    (agent_root / "AGENTS.md").write_text("# marker")
+    (agent_root / ".dpdrc").write_text("scope=test\n")
 
     data_dir = tmp_path / "dpd-data"
     env = {

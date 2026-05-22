@@ -18,10 +18,17 @@ class AgentScopeResolutionError(RuntimeError):
 def resolve_agent_scope(roots: list[str]) -> str:
     """Return the encoded agent-scope path used as sqlite directory name.
 
-    Walks up from roots[0] looking for a `Makefile + AGENTS.md` marker pair,
-    but bounded: never matches a marker at `Path.home()` or above. This
-    prevents silent misrouting when a user happens to have those files
-    in their home directory (or further up the tree).
+    Walks up from roots[0] looking for an ``.dpdrc`` marker, bounded so a
+    marker at ``Path.home()`` or above is refused. This prevents silent
+    misrouting when a user happens to have ``.dpdrc`` in their home directory
+    (or further up the tree).
+
+    When no marker is found below home, falls back to encoding ``roots[0]``
+    as-is — DPD still works, but per-project DB isolation depends on the
+    client's root choice.
+
+    ``.dpdrc`` existence alone is sufficient; its contents (e.g. ``scope=``)
+    are parsed by the skill layer, not here.
     """
     if not roots:
         raise AgentScopeResolutionError(
@@ -48,7 +55,7 @@ def resolve_agent_scope(roots: list[str]) -> str:
         return resolved != home and home in resolved.parents
 
     for candidate in [start, *start.parents]:
-        if (candidate / "Makefile").exists() and (candidate / "AGENTS.md").exists():
+        if (candidate / ".dpdrc").exists():
             if _below_home(candidate):
                 return encode_agent_scope_path(candidate)
             # Match at/above home: refuse, fall through to fallback.
