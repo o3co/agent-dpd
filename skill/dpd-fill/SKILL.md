@@ -100,6 +100,30 @@ After each: one-line `added <node_id> [inferred]: <text>`
 
 ---
 
+## Per-turn self-check verification pass [v0.3.1]
+
+Before presenting the candidate list to the user, run the following checks on **each proposed inferred node**. This mirrors the ambient-mode per-turn self-checks (SKILL.md §4.8).
+
+| Check | What to verify for each proposed inferred node |
+|---|---|
+| #1 End modification | Does this inferred node implicitly modify or expand the End's scope? If yes, flag it — it requires user confirmation, not silent inference. |
+| #2 End scope | Does this node extend the subgraph beyond the End's original achievement criteria? If yes, downgrade or mark: "[out-of-scope — propose as separate subgraph?]" |
+| #3 Factual / vendor-spec claim | Does the node text assert a vendor fact, API availability, or external compatibility? If yes, mark as "unverified" and recommend WebSearch before applying. |
+| #4 `decision` node without source | Is this a `decision`-type inferred node without a source evidence node in context? If yes, add a note: "requires `derived_from` source to be identified before applying." |
+| #5 Flat overcrowding | Does this inferred node bundle N≥3 distinct concerns? If yes, propose splitting into sub-tree before adding. |
+| #6 `contributes_to` fanout | Does adding this node trigger a cascade of `contributes_to` edges to the End? If yes, apply §4.2.2 norm. |
+
+For each flagged node, annotate inline in the candidate list:
+
+```
+2. [high] decision under <parent>: "<text>"
+   Why: <rationale>
+   ⚠ Check #3: vendor-spec claim — verify before applying
+   /fcot result: <...>
+```
+
+Unflagged nodes proceed normally to user opt-in.
+
 ## /fcot orchestration
 
 For each **high-stakes** inferred node (stakes = "high"), invoke `/fcot` after proposing but before applying:

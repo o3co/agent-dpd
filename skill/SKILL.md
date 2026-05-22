@@ -163,6 +163,16 @@ Interpret `/dpd <argument>` as a **hint**, not a confirmed goal. Two readings ex
 
 Always present a candidate goal and ask explicitly: "こういうゴールで DPD モード開始する、OK?" Do not assume. Do not proceed until user confirms.
 
+#### §3.2.1 Aggressive End narrowing [v0.3.1]
+
+Before confirming an End anchor (`add_node(type='end', ...)`), aggressively narrow the End:
+
+- If goal text mentions ≥3 distinct outcomes (e.g., "X AND Y AND Z") → propose splitting into multiple narrower Ends or ask user to pick the highest-priority one.
+- If `achievement_conditions` would have 5+ items → flag: "End が広すぎる可能性があります — 分割を提案します" and invite the user to split or trim.
+- End = smallest achievable outcome. "全部含めたい" → use multiple sequential Ends or a multi-subgraph structure.
+
+Rationale: an over-scoped End permits silent drift in all subsequent nodes (spec §3.2.1). Narrow End = accurate drift gate.
+
 ### §3.3 Initial graph construction (adaptive fidelity)
 
 Build the graph iteratively, not in one pass. Apply epistemic stratification:
@@ -222,6 +232,23 @@ Pool semantic is unified across phases:
 - Entry Pool: no End anchor yet → all observations are "attach undetermined"
 - Ambient Pool: End exists but specific update has no clear attach point
 
+#### §4.2.1 Pool usage decision rule [v0.3.1]
+
+| Session characteristics | Pool strategy |
+|---|---|
+| Short (< 1h), single-session, clearly directed | Direct `add_node` is fine. Pool is optional. |
+| Multi-day marination / multi-session / multi-participant raw ideas | Pool first: `pool_add` → `pool_elevate` |
+| Tangent catch (= off-topic observation surfaces mid-session) | **Always Pool** regardless of session length — park first, route later |
+
+#### §4.2.2 `contributes_to` norm when Pool is not used [v0.3.1]
+
+When Pool is skipped (direct `add_node`), subgraph membership already implies contribution. Do NOT fanout `contributes_to` to the End from many nodes.
+
+Rule:
+- Only add explicit `contributes_to` edges from nodes that are **logically central** to the subgraph — "removing this node would collapse the End's justification."
+- ≥6 simultaneous `contributes_to` edges to one End = **self-check trigger**: is implicit membership sufficient here?
+- When Pool *is* used: existing norm applies (explicit edges on `pool_elevate` + End confirmation).
+
 ### §4.3 Multi-root cross-root detection
 
 Session may have multiple active roots. Attend to one primary focus root. When a signal appears to relate to a different active root:
@@ -229,6 +256,24 @@ Session may have multiple active roots. Attend to one primary focus root. When a
 → Confirm: "これ root_X 関連かも、振り分ける?" Final routing decision is the user's.
 
 Do not silently route cross-root signals. Do not ignore them either. The hybrid confirmation is the intended pattern.
+
+#### §4.3.1 Meta-subgraph isolation [v0.3.1]
+
+Within a single session, separate **topic observations** from **meta-observations**:
+
+| Signal kind | Routing |
+|---|---|
+| "WHAT we're working on" — about the subject itself | Attach to current (topic) subgraph |
+| "HOW we're working" — about methodology, tooling, DPD itself, process feedback | Spawn or route to a **meta-subgraph** (separate root, same session) |
+
+**Decision prompt** (ask yourself each turn): "Is this observation about the topic, or about how we're approaching the topic?"
+
+**Routing prompt to user** (when meta signal detected):
+> "これは作業方法 / DPD 自体への観察のように見えます。meta-subgraph を別 root で spawn しますか?"
+
+**Default for tool-feedback / process-feedback signals = Yes** (meta-subgraph). Only attach to topic subgraph if user explicitly requests it.
+
+Rationale: meta-observations contaminate the topic subgraph and accelerate End drift (spec §4.3.1). Independent Ends per subgraph = independent drift gates.
 
 ### §4.4 Natural pause detection
 
@@ -294,7 +339,50 @@ User-driven: `/dpd-edit <pool_id>` sets `rejected_at` / `rejected_reason` to NUL
 
 ---
 
+## Per-turn self-checks (spec §4.8) [v0.3.1]
+
+Run these checks **internally each turn** before proposing any graph update. Each check is informational — it produces a self-correction or a user-confirmation prompt, not a hard error.
+
+| # | Check | Action if true |
+|---|---|---|
+| 1 | Am I about to modify the End (text / `achievement_conditions` / `paired_for`)? | **Stop.** Apply End modification gate (§5.3 below): ask user for explicit confirmation before proceeding. |
+| 2 | Would the proposed node extend the subgraph beyond the End's original scope? | Stop. Propose splitting the End or moving the signal to a new subgraph. |
+| 3 | Am I about to write a factual / vendor-spec claim as node text ("X supports Y", "Z is available in repo W")? | Verify via WebSearch / WebFetch before asserting. Do not add unverified claims to the graph. |
+| 4 | Am I about to add a `decision`-type node? | Identify the source evidence. Add a `derived_from` edge from the decision to its source simultaneously. |
+| 5 | Am I about to flatten N≥3 distinct concerns into one node? | Consider creating an intermediate parent node + sub-tree. Rule: sub-tree if each sub-item could be independently discussed, closed, or revised. |
+| 6 | Am I about to fanout ≥6 `contributes_to` edges to one End? | Apply §4.2.2 norm: keep only logically central nodes. Subgraph membership is implicit contribution. |
+
+**Self-check timing**: before proposing an update at a natural pause. Not after every sentence — at the proposal-formation step.
+
+**Failing any check** ≠ do nothing. It means: correct, split, verify, or ask — then proceed.
+
+---
+
 ## End achievement (per spec §5)
+
+### §5.0 End modification gate (hard rule) [v0.3.1]
+
+End is the subgraph's semantic anchor. Modifying it without user consent enables silent drift.
+
+**Before any of the following operations, stop and request explicit user confirmation:**
+
+| Operation | Why gate applies |
+|---|---|
+| Adding to `achievement_conditions` (expanding End scope) | End scope expansion = drift entry point |
+| Refining End `text` | Changes the anchor's meaning |
+| Changing `paired_for` (re-anchoring End to different Start) | Alters the subgraph's entire logic |
+| Creating a new End node in the same subgraph | Dual-anchor contamination |
+
+**Confirmation prompt template:**
+> "End を変更したいのですが、確認させてください。
+> 現在: [current End text + achievement_conditions]
+> 変更案: [proposed change]
+> 理由: [reason]
+> 適用してよいですか?"
+
+**Scope**: applies only to End nodes. `question` / `hypothesis` / `decision` / `evidence` etc. may be proposed by Claude unilaterally.
+
+**Principle**: End is joint authorship (user + Claude). The initial End was user-confirmed in §3.2. Any modification requires the same explicit consent.
 
 ### §5.1 mark_reached trigger
 
