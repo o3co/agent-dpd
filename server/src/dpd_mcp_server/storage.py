@@ -999,13 +999,16 @@ class Storage:
     ) -> list[sqlite3.Row]:
         if active_only and rejected_only:
             raise ValueError("active_only and rejected_only are mutually exclusive")
+        if active_only and include_rejected:
+            raise ValueError("active_only and include_rejected are mutually exclusive")
         with self.connect() as conn:
             if rejected_only:
-                # Return only items that have been rejected (and not dropped).
+                # Return only items that have been rejected (and not dropped or elevated).
                 cursor = conn.execute(
                     """
                     SELECT * FROM pool_items
                     WHERE scope_root_id = ?
+                      AND elevated_to IS NULL
                       AND rejected_at IS NOT NULL
                       AND dropped_at IS NULL
                     ORDER BY created_at, id
@@ -1013,11 +1016,12 @@ class Storage:
                     (scope_root_id,),
                 )
             elif include_rejected:
-                # Return active and rejected items; exclude only dropped.
+                # Return active and rejected items; exclude dropped and elevated.
                 cursor = conn.execute(
                     """
                     SELECT * FROM pool_items
                     WHERE scope_root_id = ?
+                      AND elevated_to IS NULL
                       AND dropped_at IS NULL
                     ORDER BY created_at, id
                     """,

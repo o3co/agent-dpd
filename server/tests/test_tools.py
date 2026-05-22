@@ -1199,6 +1199,70 @@ def test_pool_list_active_only_and_rejected_only_raises(tmp_db_path):
                         now="...")
 
 
+def test_pool_list_active_only_and_include_rejected_raises(tmp_db_path):
+    """active_only=True + include_rejected=True must raise ValueError."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="mutually exclusive"):
+        tools.pool_list(storage, scope="dpd",
+                        arguments={"active_only": True, "include_rejected": True},
+                        now="...")
+
+
+def test_pool_list_include_rejected_excludes_elevated(tmp_db_path):
+    """include_rejected=True must NOT surface items with elevated_to set."""
+    import sqlite3 as _sqlite3
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    # Add an active item, then simulate elevation via raw SQL.
+    added = tools.pool_add(storage, scope="dpd",
+                           arguments={"text": "elevated item"},
+                           now="2026-05-22T00:00:00Z")
+    pid = added["pool_item"]["id"]
+    with _sqlite3.connect(storage._db_path) as conn:
+        conn.execute(
+            "UPDATE pool_items SET elevated_to = 'fake_node_id' WHERE id = ?",
+            (pid,),
+        )
+    # Also add a plain active item and a rejected item.
+    tools.pool_add(storage, scope="dpd",
+                   arguments={"text": "active item"},
+                   now="2026-05-22T00:00:00Z")
+    _make_rejected_pool_item(storage, scope="dpd", text="rejected item")
+
+    result = tools.pool_list(storage, scope="dpd",
+                             arguments={"include_rejected": True},
+                             now="...")
+    texts = [i["text"] for i in result["items"]]
+    assert "elevated item" not in texts
+    assert "active item" in texts
+    assert "rejected item" in texts
+
+
+def test_pool_list_rejected_only_excludes_elevated(tmp_db_path):
+    """rejected_only=True must NOT surface items with elevated_to set."""
+    import sqlite3 as _sqlite3
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    # Add a rejected item, then simulate elevation via raw SQL.
+    pid = _make_rejected_pool_item(storage, scope="dpd", text="elevated+rejected item")
+    with _sqlite3.connect(storage._db_path) as conn:
+        conn.execute(
+            "UPDATE pool_items SET elevated_to = 'fake_node_id' WHERE id = ?",
+            (pid,),
+        )
+    # Add a normal rejected item that should appear.
+    _make_rejected_pool_item(storage, scope="dpd", text="plain rejected item")
+
+    result = tools.pool_list(storage, scope="dpd",
+                             arguments={"rejected_only": True},
+                             now="...")
+    texts = [i["text"] for i in result["items"]]
+    assert "elevated+rejected item" not in texts
+    assert "plain rejected item" in texts
+
+
 # ---------------------------------------------------------------------------
 # Task 6: add_node v3 extension, set_focus root_id, list_open_nodes state
 # ---------------------------------------------------------------------------
