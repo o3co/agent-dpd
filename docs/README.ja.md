@@ -2,6 +2,8 @@
 
 [English](README.md)
 
-補足ドキュメント: ADR、release note (必要に応じて)、実装レベル仕様 (upstream から graduation 後)。
+Deep-dive ドキュメント。top-level の [README.ja.md](../README.ja.md) は install + 使い方をカバー、このディレクトリは *why* と *how* をカバーする。
 
-**ユーザ向け readable spec** は top-level の [`README.ja.md`](../README.ja.md) に。**実装レベルの dev spec** (DDL、エラーコード、state machine 表) は現状 upstream の agent scope に存在し、このディレクトリへの graduation は計画中。non-trivial な contribution で必要ならメンテナに依頼を。
+- **[`concept.ja.md`](concept.ja.md)** — DPD とは何か、なぜ存在するか、グラフの動き (Mermaid + lifecycle)、agent-driven dogfood の物語、status と versioning。
+
+ADR と release note (必要に応じて) もここに置く。実装レベルの完全 dev spec (DDL、エラーコード、state machine 表) は現状 upstream の agent scope に存在し、このディレクトリへの graduation は計画中。non-trivial な contribution で必要ならメンテナに依頼を。
