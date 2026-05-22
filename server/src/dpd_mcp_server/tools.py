@@ -734,6 +734,24 @@ def pool_drop(
     return {"pool_id": pool_id_, "dropped_at": now}
 
 
+def pool_reject(
+    storage: Storage,
+    *,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Soft-suppress a Pool item by marking it rejected.
+
+    Orthogonal to pool_drop: rejection is a soft suppression signal (signals
+    Claude to auto-suppress re-detection), drop is hard removal.  Both can
+    coexist on the same item (reject first, then drop later).
+    """
+    pool_id = arguments["pool_id"]
+    reason = arguments.get("reason")
+    updated = storage.reject_pool_item(pool_id=pool_id, reason=reason, now=now)
+    return {"pool_item": updated}
+
+
 def mark_reached(
     storage: Storage,
     *,

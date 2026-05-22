@@ -1072,6 +1072,52 @@ class Storage:
                 (now, f"dropped:{reason}" if reason else "dropped", pool_id),
             )
 
+    def reject_pool_item(
+        self,
+        *,
+        pool_id: str,
+        reason: str | None = None,
+        now: str,
+    ) -> dict[str, Any]:
+        """Mark a pool item as rejected.
+
+        Orthogonal to drop_pool_item: rejection is a soft suppression signal,
+        drop is hard removal.  A dropped item cannot be rejected (raises
+        ValueError); a rejected item can still be dropped later.
+
+        Idempotency: re-rejecting updates rejected_reason but keeps the original
+        rejected_at timestamp ("first reject wins" for timestamp).
+
+        Raises ValueError if pool_id doesn't exist or is already dropped.
+        """
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT rejected_at, dropped_at FROM pool_items WHERE id = ?",
+                (pool_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"pool item not found: {pool_id}")
+            if row["dropped_at"] is not None:
+                raise ValueError(
+                    f"pool item is dropped, cannot reject: {pool_id}"
+                )
+            # Idempotent: keep original rejected_at if already set.
+            if row["rejected_at"] is None:
+                conn.execute(
+                    "UPDATE pool_items SET rejected_at = ?, rejected_reason = ?"
+                    " WHERE id = ?",
+                    (now, reason, pool_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE pool_items SET rejected_reason = ? WHERE id = ?",
+                    (reason, pool_id),
+                )
+            updated = conn.execute(
+                "SELECT * FROM pool_items WHERE id = ?", (pool_id,)
+            ).fetchone()
+        return dict(updated)
+
     # ------------------------------------------------------------------
     # v0.3 node insert + state machine
     # ------------------------------------------------------------------

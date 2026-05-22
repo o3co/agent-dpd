@@ -1560,3 +1560,119 @@ def test_force_delete_node_tool(tmp_db_path: str) -> None:
     assert storage.get_node(session_id="ses_1", node_id="n_e") is None
     # Start node still exists
     assert storage.get_node(session_id="ses_1", node_id="n_s") is not None
+
+
+# ---------------------------------------------------------------------------
+# Task 3 (v0.3.1): pool_reject tool
+# ---------------------------------------------------------------------------
+
+
+def test_pool_reject_sets_rejected_at_and_reason(tmp_db_path):
+    """pool_reject(pool_id, reason='abc') sets rejected_at to now and rejected_reason to 'abc'."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    added = tools.pool_add(storage, scope="dpd",
+                           arguments={"text": "to be rejected"},
+                           now="2026-05-22T00:00:00Z")
+    pid = added["pool_item"]["id"]
+
+    result = tools.pool_reject(storage,
+                               arguments={"pool_id": pid, "reason": "not relevant"},
+                               now="2026-05-22T01:00:00Z")
+
+    item = result["pool_item"]
+    assert item["rejected_at"] == "2026-05-22T01:00:00Z"
+    assert item["rejected_reason"] == "not relevant"
+
+
+def test_pool_reject_without_reason(tmp_db_path):
+    """pool_reject(pool_id) sets rejected_at but leaves rejected_reason NULL."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    added = tools.pool_add(storage, scope="dpd",
+                           arguments={"text": "to be rejected silently"},
+                           now="2026-05-22T00:00:00Z")
+    pid = added["pool_item"]["id"]
+
+    result = tools.pool_reject(storage,
+                               arguments={"pool_id": pid},
+                               now="2026-05-22T01:00:00Z")
+
+    item = result["pool_item"]
+    assert item["rejected_at"] == "2026-05-22T01:00:00Z"
+    assert item["rejected_reason"] is None
+
+
+def test_pool_reject_idempotent_reason_update(tmp_db_path):
+    """Re-rejecting an already-rejected item updates rejected_reason but keeps original rejected_at."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    added = tools.pool_add(storage, scope="dpd",
+                           arguments={"text": "reject twice"},
+                           now="2026-05-22T00:00:00Z")
+    pid = added["pool_item"]["id"]
+
+    tools.pool_reject(storage,
+                      arguments={"pool_id": pid, "reason": "first reason"},
+                      now="2026-05-22T01:00:00Z")
+    result = tools.pool_reject(storage,
+                               arguments={"pool_id": pid, "reason": "updated reason"},
+                               now="2026-05-22T02:00:00Z")
+
+    item = result["pool_item"]
+    # rejected_at must stay at the FIRST rejection timestamp.
+    assert item["rejected_at"] == "2026-05-22T01:00:00Z"
+    assert item["rejected_reason"] == "updated reason"
+
+
+def test_pool_reject_on_dropped_raises(tmp_db_path):
+    """pool_reject on a dropped item (dropped_at IS NOT NULL) raises ValueError."""
+    from dpd_mcp_server import tools
+    import pytest as _pytest
+    storage = Storage.open(tmp_db_path)
+    added = tools.pool_add(storage, scope="dpd",
+                           arguments={"text": "dropped item"},
+                           now="2026-05-22T00:00:00Z")
+    pid = added["pool_item"]["id"]
+    tools.pool_drop(storage, scope="dpd",
+                    arguments={"pool_id": pid, "reason": "noise"},
+                    now="2026-05-22T01:00:00Z")
+
+    with _pytest.raises(ValueError, match="dropped"):
+        tools.pool_reject(storage,
+                          arguments={"pool_id": pid, "reason": "too late"},
+                          now="2026-05-22T02:00:00Z")
+
+
+def test_pool_reject_unknown_id_raises(tmp_db_path):
+    """pool_reject with non-existent pool_id raises ValueError."""
+    from dpd_mcp_server import tools
+    import pytest as _pytest
+    storage = Storage.open(tmp_db_path)
+
+    with _pytest.raises(ValueError, match="not found"):
+        tools.pool_reject(storage,
+                          arguments={"pool_id": "nonexistent-id"},
+                          now="2026-05-22T01:00:00Z")
+
+
+def test_pool_reject_does_not_affect_dropped_at(tmp_db_path):
+    """Rejecting an item does NOT modify its dropped_at (orthogonal lifecycle).
+
+    Note: pool_reject raises if dropped_at IS NOT NULL (dropped items cannot
+    be rejected). This test verifies the orthogonal direction: a newly rejected
+    item has dropped_at = NULL and a subsequent call to pool_drop can still
+    set it independently.
+    """
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    added = tools.pool_add(storage, scope="dpd",
+                           arguments={"text": "reject then drop"},
+                           now="2026-05-22T00:00:00Z")
+    pid = added["pool_item"]["id"]
+
+    reject_result = tools.pool_reject(storage,
+                                      arguments={"pool_id": pid, "reason": "rejected"},
+                                      now="2026-05-22T01:00:00Z")
+    # After rejection, dropped_at must still be NULL.
+    assert reject_result["pool_item"]["dropped_at"] is None

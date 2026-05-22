@@ -1,4 +1,4 @@
-"""MCP server wiring: register the 18 DPD tools over stdio."""
+"""MCP server wiring: register the 29 DPD tools over stdio."""
 
 from __future__ import annotations
 
@@ -634,6 +634,30 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="pool_reject",
+            title="Reject pool item (soft suppress)",
+            description=(
+                "Mark a pool item as rejected. Orthogonal to pool_drop: rejection is "
+                "soft suppression (signal for Claude to auto-suppress re-detection), "
+                "drop is hard removal. Both can coexist on the same item."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["pool_id"],
+                "properties": {
+                    "pool_id": {"type": "string", "description": "ID of the pool item"},
+                    "reason": {
+                        "type": ["string", "null"],
+                        "description": "Optional reason (e.g., user's reject statement)",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
             name="mark_reached",
             title="Mark End node reached",
             description="Signal End node achievement → transitions subgraph to closed state.",
@@ -843,6 +867,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.pool_drop(
             storage, scope=scope, arguments=tool_args, now=now
         )
+    if name == "pool_reject":
+        return tools.pool_reject(storage, arguments=tool_args, now=now)
 
     raise ValueError(f"unknown tool: {name}")
 
