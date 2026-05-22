@@ -1763,3 +1763,86 @@ def test_v3_scope_root_requires_non_null_scope(tmp_db_path: str) -> None:
                 "topic, lifecycle, spawned_at) "
                 "VALUES ('r_bad', NULL, NULL, 1, 't', 'active', '2026-05-22T00:00:00Z')"
             )
+
+
+# ---------------------------------------------------------------------------
+# v0.3 Task 2: scope_root resolution + pool_items CRUD
+# ---------------------------------------------------------------------------
+
+
+def test_get_or_create_scope_root_first_call_creates(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    row = storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T00:00:00Z")
+    assert row["scope_root"] == 1
+    assert row["scope"] == "dpd"
+    assert row["session_id"] is None
+
+
+def test_get_or_create_scope_root_second_call_returns_same_row(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    r1 = storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T00:00:00Z")
+    r2 = storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T01:00:00Z")
+    assert r1["id"] == r2["id"]
+
+
+def test_get_or_create_scope_root_distinct_per_scope(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    a = storage.get_or_create_scope_root(scope="alpha", now="2026-05-22T00:00:00Z")
+    b = storage.get_or_create_scope_root(scope="beta", now="2026-05-22T00:00:00Z")
+    assert a["id"] != b["id"]
+
+
+def test_insert_pool_item_and_list(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    root = storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T00:00:00Z")
+    storage.insert_pool_item(
+        pool_id="pool_aaaa1111",
+        scope_root_id=root["id"],
+        text="raw thought 1",
+        origin_session_id=None,
+        origin_turn=None,
+        tags="tangent",
+        now="2026-05-22T00:00:00Z",
+    )
+    items = storage.list_pool_items(scope_root_id=root["id"], active_only=True)
+    assert len(items) == 1
+    assert items[0]["text"] == "raw thought 1"
+    assert items[0]["tags"] == "tangent"
+
+
+def test_pool_elevate_marks_elevated_to(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    root = storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T00:00:00Z")
+    # Need a session and a target node to elevate into.
+    storage.insert_session(session_id="ses_1", scope="dpd", label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r_legacy", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node(node_id="n_target", session_id="ses_1",
+                        node_type="question", text="q", parent_id="r_legacy",
+                        parent_kind="root", now="2026-05-22T00:00:00Z")
+    storage.insert_pool_item(pool_id="pool_b1", scope_root_id=root["id"],
+                             text="t1", origin_session_id=None,
+                             origin_turn=None, tags=None,
+                             now="2026-05-22T00:00:00Z")
+    storage.mark_pool_elevated(pool_id="pool_b1", elevated_to="n_target",
+                               now="2026-05-22T01:00:00Z")
+    actives = storage.list_pool_items(scope_root_id=root["id"], active_only=True)
+    assert actives == []
+    all_items = storage.list_pool_items(scope_root_id=root["id"], active_only=False)
+    assert len(all_items) == 1
+    assert all_items[0]["elevated_to"] == "n_target"
+    assert all_items[0]["elevated_at"] == "2026-05-22T01:00:00Z"
+
+
+def test_pool_drop_marks_dropped_at(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    root = storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T00:00:00Z")
+    storage.insert_pool_item(pool_id="pool_c1", scope_root_id=root["id"],
+                             text="x", origin_session_id=None,
+                             origin_turn=None, tags=None,
+                             now="2026-05-22T00:00:00Z")
+    storage.drop_pool_item(pool_id="pool_c1", reason="noise",
+                           now="2026-05-22T02:00:00Z")
+    actives = storage.list_pool_items(scope_root_id=root["id"], active_only=True)
+    assert actives == []

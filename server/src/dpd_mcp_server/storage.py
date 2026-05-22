@@ -839,3 +839,105 @@ class Storage:
                     frontier.append(("expand", child["id"], "node"))
                     frontier.append(("emit", child))
             return result
+
+    # -----------------------------------------------------------------------
+    # v0.3 Task 2: scope_root resolution + pool_items CRUD
+    # -----------------------------------------------------------------------
+
+    def get_or_create_scope_root(self, *, scope: str, now: str) -> sqlite3.Row:
+        """Return the singleton scope_root row for the given scope, creating if absent.
+
+        Uses the UNIQUE partial index on (scope) WHERE scope_root=1 to enforce singleton.
+        Generated id format: root_<hex8> via ids.root_id().
+        """
+        from .ids import root_id  # local import to avoid top-of-file churn
+        with self.connect() as conn:
+            existing = conn.execute(
+                "SELECT * FROM roots WHERE scope = ? AND scope_root = 1",
+                (scope,),
+            ).fetchone()
+            if existing is not None:
+                return existing
+            new_id = root_id()
+            conn.execute(
+                """
+                INSERT INTO roots
+                    (id, session_id, scope, scope_root, topic, lifecycle,
+                     spawned_at, last_focused_at)
+                VALUES (?, NULL, ?, 1, ?, 'active', ?, NULL)
+                """,
+                (new_id, scope, f"{scope} scope root", now),
+            )
+            return conn.execute(
+                "SELECT * FROM roots WHERE id = ?", (new_id,)
+            ).fetchone()
+
+    def insert_pool_item(
+        self,
+        *,
+        pool_id: str,
+        scope_root_id: str,
+        text: str,
+        origin_session_id: str | None,
+        origin_turn: str | None,
+        tags: str | None,
+        now: str,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO pool_items
+                    (id, scope_root_id, origin_session_id, text,
+                     origin_turn, created_at, elevated_to, elevated_at,
+                     dropped_at, tags)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?)
+                """,
+                (pool_id, scope_root_id, origin_session_id, text,
+                 origin_turn, now, tags),
+            )
+
+    def list_pool_items(
+        self, *, scope_root_id: str, active_only: bool = True
+    ) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            if active_only:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM pool_items
+                    WHERE scope_root_id = ?
+                      AND elevated_to IS NULL
+                      AND dropped_at IS NULL
+                    ORDER BY created_at, id
+                    """,
+                    (scope_root_id,),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM pool_items WHERE scope_root_id = ? "
+                    "ORDER BY created_at, id",
+                    (scope_root_id,),
+                )
+            return list(cursor)
+
+    def mark_pool_elevated(
+        self, *, pool_id: str, elevated_to: str, now: str
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE pool_items SET elevated_to = ?, elevated_at = ? "
+                "WHERE id = ?",
+                (elevated_to, now, pool_id),
+            )
+
+    def drop_pool_item(
+        self, *, pool_id: str, reason: str | None, now: str
+    ) -> None:
+        # reason is recorded by appending to tags as "dropped:<reason>" — keeps
+        # schema minimal for MVP. Future v0.4 may add a dropped_reason column.
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE pool_items SET dropped_at = ?, "
+                "tags = COALESCE(NULLIF(tags || ',', ','), '') || ? "
+                "WHERE id = ?",
+                (now, f"dropped:{reason}" if reason else "dropped", pool_id),
+            )

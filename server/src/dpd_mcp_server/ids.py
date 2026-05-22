@@ -8,3 +8,13 @@ import secrets
 def new_id(prefix: str) -> str:
     """Return ``<prefix>_<12 hex chars>``."""
     return f"{prefix}_{secrets.token_hex(6)}"
+
+
+def root_id() -> str:
+    """Return a root identifier: ``root_<8 hex chars>``."""
+    return f"root_{secrets.token_hex(4)}"
+
+
+def pool_id() -> str:
+    """Return a pool item identifier: ``pool_<8 hex chars>``."""
+    return f"pool_{secrets.token_hex(4)}"
