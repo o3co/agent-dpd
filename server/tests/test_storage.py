@@ -1750,7 +1750,7 @@ def test_storage_open_migrates_v2_to_v3_schema(tmp_db_path: str) -> None:
         assert col in node_cols, f"missing nodes.{col}"
     for col in ("scope", "scope_root", "migrated_to_start_id"):
         assert col in root_cols, f"missing roots.{col}"
-    assert version == 3, f"user_version should be 3, got {version}"
+    assert version == 4, f"user_version should be 4, got {version}"
 
 
 def test_v3_scope_root_requires_non_null_scope(tmp_db_path: str) -> None:
@@ -2218,3 +2218,52 @@ def test_force_delete_node_handles_paired_and_elevated_fks(tmp_db_path: str) -> 
     assert actives == []
     all_items = storage.list_pool_items(scope_root_id=root["id"], active_only=False)
     assert all_items[0]["dropped_at"] is not None
+
+
+# ---------------------------------------------------------------------------
+# v0.3.1 / schema v4 tests
+# ---------------------------------------------------------------------------
+
+def test_v4_sessions_has_mode_column(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}
+        assert "mode" in cols
+
+
+def test_v4_pool_items_has_rejected_columns(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(pool_items)")}
+        assert "rejected_at" in cols
+        assert "rejected_reason" in cols
+        assert "text_hash" in cols
+
+
+def test_v4_nodes_has_provenance_with_check(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(nodes)")}
+        assert "provenance" in cols
+        # CHECK constraint should reject invalid value
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO nodes (id, session_id, type, text, provenance, state) "
+                "VALUES ('node_test', 'ses_test', 'question', 't', 'invalid_provenance', 'active')"
+            )
+
+
+def test_v4_user_version_is_4(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    assert version == 4
+
+
+def test_v4_pool_rejected_index_exists(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        idx = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_pool_rejected'"
+        ).fetchone()
+    assert idx is not None

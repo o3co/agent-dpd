@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     label        TEXT,
     started_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
-    focus_node_id TEXT
+    focus_node_id TEXT,
+    mode         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS roots (
@@ -49,6 +50,8 @@ CREATE TABLE IF NOT EXISTS nodes (
         'start','end'
     )),
     text            TEXT NOT NULL,
+    provenance      TEXT NOT NULL DEFAULT 'grounded'
+        CHECK (provenance IN ('grounded', 'inferred', 'imported', 'manual')),
     status          TEXT NOT NULL CHECK (status IN ('open','closed')),
     closure_reason  TEXT
         CHECK (closure_reason IS NULL OR
@@ -95,11 +98,16 @@ CREATE TABLE IF NOT EXISTS pool_items (
     elevated_to       TEXT REFERENCES nodes(id),
     elevated_at       TEXT,
     dropped_at        TEXT,
-    tags              TEXT
+    tags              TEXT,
+    rejected_at       TEXT,
+    rejected_reason   TEXT,
+    text_hash         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_pool_scope ON pool_items(scope_root_id);
 CREATE INDEX IF NOT EXISTS idx_pool_active ON pool_items(scope_root_id)
     WHERE elevated_to IS NULL AND dropped_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_pool_rejected ON pool_items(scope_root_id, created_at)
+    WHERE rejected_at IS NULL;
 
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;

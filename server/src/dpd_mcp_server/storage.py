@@ -23,16 +23,20 @@ class Storage:
     def open(cls, db_path: str) -> "Storage":
         """Create or open the database, applying schema and enabling WAL.
 
-        For databases created by v0.2 (user_version = 2), a pre-migration step
-        adds the new v3 columns via ALTER TABLE before the main schema script
-        runs. This prevents the CREATE UNIQUE INDEX statements in schema.sql
-        from failing with "no such column" on pre-existing databases.
+        Migration chain on pre-existing databases:
+          - user_version = 2: run _migrate_v2_to_v3 (structural rebuild),
+            then migrate_v3_to_v4 (ALTER TABLE + partial index).
+          - user_version = 3: run migrate_v3_to_v4 only.
+          - user_version >= 4: no migration needed; schema.sql is applied
+            (CREATE TABLE IF NOT EXISTS is idempotent).
 
         SQLite limitation: ALTER TABLE cannot add CHECK constraints, so the
         table-level CHECK (scope_root = 0 OR scope IS NOT NULL) is only present
-        on freshly-created v3 databases. For upgraded databases, this invariant
+        on freshly-created v3+ databases. For upgraded databases, this invariant
         is enforced at runtime by the Task 4 migration script.
         """
+        from .migrate_v3_to_v4 import migrate as _migrate_v3_to_v4
+
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
@@ -44,6 +48,16 @@ class Storage:
 
             schema = files("dpd_mcp_server").joinpath("schema.sql").read_text()
             conn.executescript(schema)
+
+        # Run v3→v4 migration after schema.sql if the DB was at v3 before open.
+        # We re-read user_version from the file to handle both the v2→v3→now-at-4
+        # case (schema.sql set it to 4, so this is a no-op) and the genuine v3
+        # case where schema.sql's CREATE TABLE IF NOT EXISTS did not add columns.
+        with sqlite3.connect(db_path) as conn:
+            current_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if 0 < current_version < 4:
+            _migrate_v3_to_v4(db_path=db_path)
+
         return cls(db_path)
 
     @staticmethod
