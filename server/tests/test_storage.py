@@ -1704,3 +1704,62 @@ def test_v3_node_types_include_start_and_end(tmp_db_path: str) -> None:
                 f"('n_{t}', 'ses_1', '{t}', 'x', 'open', 'root_1', 'root', "
                 "'2026-05-22T00:00:00Z', '2026-05-22T00:00:00Z')"
             )
+
+
+def test_storage_open_migrates_v2_to_v3_schema(tmp_db_path: str) -> None:
+    """A pre-existing v0.2-shaped db should be upgradeable to v3 via Storage.open()."""
+    # Seed a v0.2-shaped db manually (no new columns)
+    conn = sqlite3.connect(tmp_db_path)
+    conn.executescript("""
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, scope TEXT, label TEXT,
+            started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            focus_node_id TEXT
+        );
+        CREATE TABLE roots (
+            id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            lifecycle TEXT NOT NULL CHECK (lifecycle IN ('active','archived','deferred')),
+            spawned_at TEXT NOT NULL, last_focused_at TEXT
+        );
+        CREATE TABLE nodes (
+            id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            type TEXT NOT NULL, text TEXT NOT NULL,
+            status TEXT NOT NULL, closure_reason TEXT,
+            parent_id TEXT NOT NULL, parent_kind TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            from_node TEXT NOT NULL, to_node TEXT NOT NULL,
+            type TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 2;
+    """)
+    conn.commit()
+    conn.close()
+
+    # Opening with the v3 Storage class must not throw, and must add v3 columns.
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        node_cols = {row[1] for row in conn.execute("PRAGMA table_info(nodes)")}
+        root_cols = {row[1] for row in conn.execute("PRAGMA table_info(roots)")}
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    for col in ("paired_for", "state", "archived_at"):
+        assert col in node_cols, f"missing nodes.{col}"
+    for col in ("scope", "scope_root", "migrated_to_start_id"):
+        assert col in root_cols, f"missing roots.{col}"
+    assert version == 3, f"user_version should be 3, got {version}"
+
+
+def test_v3_scope_root_requires_non_null_scope(tmp_db_path: str) -> None:
+    """On a freshly-created v3 db, inserting a scope_root row with NULL scope must fail."""
+    storage = Storage.open(tmp_db_path)
+    with storage.connect() as conn:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO roots (id, session_id, scope, scope_root, "
+                "topic, lifecycle, spawned_at) "
+                "VALUES ('r_bad', NULL, NULL, 1, 't', 'active', '2026-05-22T00:00:00Z')"
+            )

@@ -21,14 +21,76 @@ class Storage:
 
     @classmethod
     def open(cls, db_path: str) -> "Storage":
-        """Create or open the database, applying schema and enabling WAL."""
+        """Create or open the database, applying schema and enabling WAL.
+
+        For databases created by v0.2 (user_version = 2), a pre-migration step
+        adds the new v3 columns via ALTER TABLE before the main schema script
+        runs. This prevents the CREATE UNIQUE INDEX statements in schema.sql
+        from failing with "no such column" on pre-existing databases.
+
+        SQLite limitation: ALTER TABLE cannot add CHECK constraints, so the
+        table-level CHECK (scope_root = 0 OR scope IS NOT NULL) is only present
+        on freshly-created v3 databases. For upgraded databases, this invariant
+        is enforced at runtime by the Task 4 migration script.
+        """
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
             conn.execute("PRAGMA journal_mode = WAL")
+
+            user_version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if 0 < user_version < 3:
+                cls._migrate_v2_to_v3(conn)
+
             schema = files("dpd_mcp_server").joinpath("schema.sql").read_text()
             conn.executescript(schema)
         return cls(db_path)
+
+    @staticmethod
+    def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+        """Add v3 columns to a v2-shaped database via ALTER TABLE.
+
+        Each ALTER TABLE is wrapped in a try/except so that partially-migrated
+        databases (e.g. a previous interrupted upgrade) are handled gracefully —
+        SQLite raises OperationalError when the column already exists.
+
+        Called only when user_version < 3; user_version is updated to 3 by
+        the PRAGMA at the end of schema.sql (via executescript).
+        """
+        existing_root_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(roots)")
+        }
+        existing_node_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(nodes)")
+        }
+
+        root_alters = [
+            "ALTER TABLE roots ADD COLUMN scope TEXT",
+            "ALTER TABLE roots ADD COLUMN scope_root INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE roots ADD COLUMN migrated_to_start_id TEXT",
+        ]
+        node_alters = [
+            "ALTER TABLE nodes ADD COLUMN paired_for TEXT REFERENCES nodes(id)",
+            "ALTER TABLE nodes ADD COLUMN achievement_conditions TEXT",
+            "ALTER TABLE nodes ADD COLUMN achievement_conditions_satisfied "
+            "INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE nodes ADD COLUMN state TEXT NOT NULL DEFAULT 'active'",
+            "ALTER TABLE nodes ADD COLUMN archived_at TEXT",
+            "ALTER TABLE nodes ADD COLUMN closed_at TEXT",
+            "ALTER TABLE nodes ADD COLUMN deletable_at TEXT",
+        ]
+
+        for stmt in root_alters:
+            col = stmt.split("ADD COLUMN")[1].strip().split()[0]
+            if col not in existing_root_cols:
+                conn.execute(stmt)
+
+        for stmt in node_alters:
+            col = stmt.split("ADD COLUMN")[1].strip().split()[0]
+            if col not in existing_node_cols:
+                conn.execute(stmt)
+
+        conn.commit()
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

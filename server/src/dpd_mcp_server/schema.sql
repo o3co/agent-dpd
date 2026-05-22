@@ -1,3 +1,6 @@
+-- NOTE: PRAGMA foreign_keys is a per-connection toggle; this line has no
+-- persistent effect after schema apply. FK enforcement is set in
+-- Storage.connect() on every new connection.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -11,16 +14,24 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS roots (
     id                   TEXT PRIMARY KEY,
-    session_id           TEXT REFERENCES sessions(id),     -- v3: NULLABLE for scope_root rows
-    scope                TEXT,                              -- v3: scope name for scope_root rows
+    session_id           TEXT REFERENCES sessions(id),     -- NULLABLE for scope_root rows
+    scope                TEXT,                              -- scope name for scope_root rows
     scope_root           INTEGER NOT NULL DEFAULT 0
         CHECK (scope_root IN (0,1)),
-    migrated_to_start_id TEXT,                              -- v3: pointer to Start node from v2 migration
+    migrated_to_start_id TEXT,                              -- pointer to Start node from v2 migration
     topic                TEXT NOT NULL,
     lifecycle            TEXT NOT NULL
         CHECK (lifecycle IN ('active','archived','deferred')),
     spawned_at           TEXT NOT NULL,
-    last_focused_at      TEXT
+    last_focused_at      TEXT,
+    -- scope_root rows must always have a non-NULL scope so the partial UNIQUE
+    -- index (uniq_roots_scope_root) is meaningful. SQLite treats NULL as distinct
+    -- in UNIQUE indexes, so without this CHECK multiple NULL-scope scope_root
+    -- rows would be silently allowed.
+    -- NOTE: for databases upgraded from v2 via ALTER TABLE, this CHECK is not
+    -- retroactively added; the invariant is enforced at runtime by the migration
+    -- script (Task 4) which ensures all scope_root inserts supply a non-NULL scope.
+    CHECK (scope_root = 0 OR scope IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_roots_session ON roots(session_id);
@@ -35,7 +46,7 @@ CREATE TABLE IF NOT EXISTS nodes (
         'question','plan','hypothesis','goal','problem',
         'answer','action','verification','decision','resolution',
         'evidence','constraint','assumption','rationale','risk',
-        'start','end'                                           -- v3 additions
+        'start','end'
     )),
     text            TEXT NOT NULL,
     status          TEXT NOT NULL CHECK (status IN ('open','closed')),
@@ -44,15 +55,15 @@ CREATE TABLE IF NOT EXISTS nodes (
                closure_reason IN ('resolved','rejected','invalidated')),
     parent_id       TEXT NOT NULL,
     parent_kind     TEXT NOT NULL CHECK (parent_kind IN ('root','node')),
-    paired_for      TEXT REFERENCES nodes(id),              -- v3: End → Start
-    achievement_conditions TEXT,                              -- v3: free-form text
+    paired_for      TEXT REFERENCES nodes(id),              -- End → Start pairing
+    achievement_conditions TEXT,                              -- free-form text
     achievement_conditions_satisfied INTEGER NOT NULL DEFAULT 0
-        CHECK (achievement_conditions_satisfied IN (0,1)),    -- v3
+        CHECK (achievement_conditions_satisfied IN (0,1)),
     state           TEXT NOT NULL DEFAULT 'active'
-        CHECK (state IN ('active','archived','closed','deletable','gone')),  -- v3
-    archived_at     TEXT,                                     -- v3
-    closed_at       TEXT,                                     -- v3
-    deletable_at    TEXT,                                     -- v3
+        CHECK (state IN ('active','archived','closed','deletable','gone')),
+    archived_at     TEXT,
+    closed_at       TEXT,
+    deletable_at    TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
