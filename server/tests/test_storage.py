@@ -2086,6 +2086,101 @@ def test_delete_subgraph_tombstones_elevated_pool_items(tmp_db_path: str) -> Non
     assert all_items[0]["elevated_at"] == "2026-05-22T00:30:00Z"  # audit preserved
 
 
+# ---------------------------------------------------------------------------
+# Fix #1: schema migration relaxes v2 constraints (RED)
+# ---------------------------------------------------------------------------
+
+
+def test_storage_open_migration_relaxes_v2_constraints(tmp_db_path: str) -> None:
+    """A pre-existing v0.2 db must allow scope_root insert and start/end node
+    insert after migration — verifying that NOT NULL and CHECK constraints are
+    actually rebuilt, not just new columns added via ALTER TABLE."""
+    import sqlite3 as _sqlite3
+    # Seed a v0.2-shaped database with the STRICT v0.2 constraints intact.
+    conn = _sqlite3.connect(tmp_db_path)
+    conn.executescript("""
+        CREATE TABLE sessions (id TEXT PRIMARY KEY, scope TEXT, label TEXT,
+                              started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                              focus_node_id TEXT);
+        CREATE TABLE roots (id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                            topic TEXT NOT NULL,
+                            lifecycle TEXT NOT NULL CHECK (lifecycle IN ('active','archived','deferred')),
+                            spawned_at TEXT NOT NULL, last_focused_at TEXT);
+        CREATE TABLE nodes (id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                            type TEXT NOT NULL CHECK (type IN (
+                                'question','plan','hypothesis','goal','problem',
+                                'answer','action','verification','decision','resolution',
+                                'evidence','constraint','assumption','rationale','risk')),
+                            text TEXT NOT NULL,
+                            status TEXT NOT NULL CHECK (status IN ('open','closed')),
+                            closure_reason TEXT,
+                            parent_id TEXT NOT NULL, parent_kind TEXT NOT NULL,
+                            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            from_node TEXT NOT NULL, to_node TEXT NOT NULL,
+                            type TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL);
+        PRAGMA user_version = 2;
+    """)
+    conn.commit()
+    conn.close()
+
+    # Open with v3 — must rebuild tables with relaxed constraints.
+    storage = Storage.open(tmp_db_path)
+
+    # Now we must be able to insert scope_root with session_id=NULL:
+    storage.get_or_create_scope_root(scope="dpd", now="2026-05-22T00:00:00Z")
+
+    # AND we must be able to insert Start/End nodes (= new type vocab):
+    storage.insert_session(session_id="ses_1", scope="dpd", label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
+                           text="s", parent_id="r1",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    # If we got here without IntegrityError, the constraints were properly relaxed.
+    node = storage.get_node(session_id="ses_1", node_id="n_s")
+    assert node is not None
+    assert node["type"] == "start"
+
+
+# ---------------------------------------------------------------------------
+# Fix #3: mark_reached syncs legacy status column (RED)
+# ---------------------------------------------------------------------------
+
+
+def test_mark_reached_syncs_legacy_status(tmp_db_path: str) -> None:
+    """mark_reached must update both state and legacy status columns.
+
+    If status remains 'open' after mark_reached, list_open_nodes (which
+    filters by status='open') incorrectly continues showing closed subgraphs.
+    """
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
+                           text="s", parent_id="r1",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
+                           text="e", parent_id="n_s",
+                           paired_for="n_s", achievement_conditions="done",
+                           now="2026-05-22T00:00:00Z")
+
+    storage.mark_reached(session_id="ses_1", end_node_id="n_e",
+                         now="2026-05-22T01:00:00Z")
+
+    for nid in ("n_s", "n_e"):
+        node = storage.get_node(session_id="ses_1", node_id=nid)
+        assert node["state"] == "closed", f"{nid} state should be closed"
+        assert node["status"] == "closed", \
+            f"{nid} legacy status should be 'closed' (was left 'open' before fix)"
+
+
 def test_force_delete_node_handles_paired_and_elevated_fks(tmp_db_path: str) -> None:
     """force_delete_node must null paired_for and tombstone pool_items.elevated_to
     to avoid FK violations."""

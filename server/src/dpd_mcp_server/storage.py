@@ -48,49 +48,84 @@ class Storage:
 
     @staticmethod
     def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
-        """Add v3 columns to a v2-shaped database via ALTER TABLE.
+        """Upgrade a v0.2 database to v0.3 by rebuilding constrained tables.
 
-        Each ALTER TABLE is wrapped in a try/except so that partially-migrated
-        databases (e.g. a previous interrupted upgrade) are handled gracefully —
-        SQLite raises OperationalError when the column already exists.
+        SQLite cannot ALTER existing column constraints (NOT NULL, CHECK),
+        so we rebuild ``roots`` and ``nodes`` with the v3 shape, preserving data.
+
+        The method is idempotent: if the new columns already exist (e.g. from a
+        previously interrupted upgrade), the INSERT … SELECT still copies all
+        rows correctly and DROP/RENAME recreates the v3-shaped table.
 
         Called only when user_version < 3; user_version is updated to 3 by
         the PRAGMA at the end of schema.sql (via executescript).
         """
-        existing_root_cols = {
-            row[1] for row in conn.execute("PRAGMA table_info(roots)")
-        }
-        existing_node_cols = {
-            row[1] for row in conn.execute("PRAGMA table_info(nodes)")
-        }
+        conn.executescript("""
+            -- Disable FK temporarily so we can drop/rename tables freely.
+            PRAGMA foreign_keys = OFF;
 
-        root_alters = [
-            "ALTER TABLE roots ADD COLUMN scope TEXT",
-            "ALTER TABLE roots ADD COLUMN scope_root INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE roots ADD COLUMN migrated_to_start_id TEXT",
-        ]
-        node_alters = [
-            "ALTER TABLE nodes ADD COLUMN paired_for TEXT REFERENCES nodes(id)",
-            "ALTER TABLE nodes ADD COLUMN achievement_conditions TEXT",
-            "ALTER TABLE nodes ADD COLUMN achievement_conditions_satisfied "
-            "INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE nodes ADD COLUMN state TEXT NOT NULL DEFAULT 'active'",
-            "ALTER TABLE nodes ADD COLUMN archived_at TEXT",
-            "ALTER TABLE nodes ADD COLUMN closed_at TEXT",
-            "ALTER TABLE nodes ADD COLUMN deletable_at TEXT",
-        ]
+            -- 1. Rebuild roots: session_id nullable, add scope/scope_root/migrated_to_start_id
+            CREATE TABLE IF NOT EXISTS roots_new (
+                id                   TEXT PRIMARY KEY,
+                session_id           TEXT REFERENCES sessions(id),
+                scope                TEXT,
+                scope_root           INTEGER NOT NULL DEFAULT 0
+                    CHECK (scope_root IN (0,1)),
+                migrated_to_start_id TEXT,
+                topic                TEXT NOT NULL,
+                lifecycle            TEXT NOT NULL
+                    CHECK (lifecycle IN ('active','archived','deferred')),
+                spawned_at           TEXT NOT NULL,
+                last_focused_at      TEXT,
+                CHECK (scope_root = 0 OR scope IS NOT NULL)
+            );
+            INSERT OR IGNORE INTO roots_new
+                (id, session_id, topic, lifecycle, spawned_at, last_focused_at)
+                SELECT id, session_id, topic, lifecycle, spawned_at, last_focused_at
+                FROM roots;
+            DROP TABLE roots;
+            ALTER TABLE roots_new RENAME TO roots;
 
-        for stmt in root_alters:
-            col = stmt.split("ADD COLUMN")[1].strip().split()[0]
-            if col not in existing_root_cols:
-                conn.execute(stmt)
+            -- 2. Rebuild nodes: extend type CHECK to include start/end; add v3 columns
+            CREATE TABLE IF NOT EXISTS nodes_new (
+                id              TEXT PRIMARY KEY,
+                session_id      TEXT NOT NULL REFERENCES sessions(id),
+                type            TEXT NOT NULL CHECK (type IN (
+                    'question','plan','hypothesis','goal','problem',
+                    'answer','action','verification','decision','resolution',
+                    'evidence','constraint','assumption','rationale','risk',
+                    'start','end'
+                )),
+                text            TEXT NOT NULL,
+                status          TEXT NOT NULL CHECK (status IN ('open','closed')),
+                closure_reason  TEXT
+                    CHECK (closure_reason IS NULL OR
+                           closure_reason IN ('resolved','rejected','invalidated')),
+                parent_id       TEXT NOT NULL,
+                parent_kind     TEXT NOT NULL CHECK (parent_kind IN ('root','node')),
+                paired_for      TEXT REFERENCES nodes(id),
+                achievement_conditions TEXT,
+                achievement_conditions_satisfied INTEGER NOT NULL DEFAULT 0
+                    CHECK (achievement_conditions_satisfied IN (0,1)),
+                state           TEXT NOT NULL DEFAULT 'active'
+                    CHECK (state IN ('active','archived','closed','deletable','gone')),
+                archived_at     TEXT,
+                closed_at       TEXT,
+                deletable_at    TEXT,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            );
+            INSERT OR IGNORE INTO nodes_new
+                (id, session_id, type, text, status, closure_reason,
+                 parent_id, parent_kind, created_at, updated_at)
+                SELECT id, session_id, type, text, status, closure_reason,
+                       parent_id, parent_kind, created_at, updated_at
+                FROM nodes;
+            DROP TABLE nodes;
+            ALTER TABLE nodes_new RENAME TO nodes;
 
-        for stmt in node_alters:
-            col = stmt.split("ADD COLUMN")[1].strip().split()[0]
-            if col not in existing_node_cols:
-                conn.execute(stmt)
-
-        conn.commit()
+            PRAGMA foreign_keys = ON;
+        """)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -1089,6 +1124,8 @@ class Storage:
                 f"""
                 UPDATE nodes
                 SET state = 'closed',
+                    status = 'closed',
+                    closure_reason = COALESCE(closure_reason, 'resolved'),
                     archived_at = COALESCE(archived_at, ?),
                     closed_at = COALESCE(closed_at, ?),
                     updated_at = ?
@@ -1203,9 +1240,20 @@ class Storage:
     def force_delete_node(
         self, *, session_id: str, node_id: str, now: str,
     ) -> None:
-        """Physical delete a single node regardless of state. Cleans referencing edges.
+        """Physical delete a single node regardless of state.
 
-        Handles FK constraints before deletion:
+        Handles paired_for self-FK and pool_items.elevated_to FK.
+
+        WARNING: This is a single-node force delete intended for emergency cleanup.
+        If the target node has children (= nodes with parent_id pointing to it),
+        those children will be left with dangling parent_id references. Children
+        are NOT reparented, NOT cascade-deleted, and NOT validated. The caller
+        is responsible for ensuring the target has no children, OR for explicitly
+        handling orphans afterward.
+
+        For safe subgraph deletion, prefer ``delete_subgraph`` (requires state=deletable).
+
+        Steps:
         1. NULLs paired_for on any End node paired to this node (if target is a Start).
         2. Tombstones pool_items elevated into this node (NULL + dropped_at + tag)
            to prevent silent reactivation of the pool item.

@@ -660,6 +660,24 @@ def pool_elevate(
             f"in session {session_id!r}"
         )
 
+    # Validate End node is still active — cannot elevate into a closed End.
+    if end_node["state"] != "active":
+        raise ValueError(
+            f"target_end_node_id {target_end_node_id!r} is in state "
+            f"{end_node['state']!r} — only active End nodes accept elevations"
+        )
+
+    # Validate session scope matches pool scope to prevent cross-scope contamination.
+    session_row = storage.get_session(session_id=session_id)
+    if session_row is None:
+        raise ValueError(f"session_id {session_id!r} not found")
+    session_scope: str | None = session_row["scope"] if session_row["scope"] else None
+    arg_scope: str | None = scope if scope else None
+    if session_scope != arg_scope:
+        raise ValueError(
+            f"session scope {session_scope!r} does not match pool scope {arg_scope!r}"
+        )
+
     # Resolve text: use override or fall back to Pool item text.
     pool_root = storage.get_or_create_scope_root(scope=scope, now=now)
     items = storage.list_pool_items(
@@ -668,6 +686,18 @@ def pool_elevate(
     pool_item = next((dict(r) for r in items if r["id"] == pool_id_), None)
     if pool_item is None:
         raise ValueError(f"pool_id {pool_id_!r} not found in scope {scope!r}")
+
+    # Validate pool item is still active — cannot re-elevate or elevate dropped items.
+    if pool_item["elevated_to"] is not None:
+        raise ValueError(
+            f"pool_id {pool_id_!r} is already elevated "
+            f"(to {pool_item['elevated_to']!r})"
+        )
+    if pool_item["dropped_at"] is not None:
+        raise ValueError(
+            f"pool_id {pool_id_!r} is dropped — cannot elevate"
+        )
+
     final_text = text_override or pool_item["text"]
 
     new_id_ = _node_id()

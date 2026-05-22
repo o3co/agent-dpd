@@ -1265,6 +1265,133 @@ def test_delete_rejects_non_deletable_state(tmp_db_path: str) -> None:
                      now="2026-05-22T01:00:00Z")
 
 
+# ---------------------------------------------------------------------------
+# Fix #2: pool_elevate validations (RED)
+# ---------------------------------------------------------------------------
+
+
+def _seed_pool_elevate_setup(storage: Storage, scope: str = "dpd") -> dict:
+    """Return a dict with pool_id, session_id, n_s, n_e already set up."""
+    from dpd_mcp_server import tools
+    storage.get_or_create_scope_root(scope=scope, now="2026-05-22T00:00:00Z")
+    storage.insert_session(session_id="ses_1", scope=scope, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
+                           text="s", parent_id="r1",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
+                           text="e", parent_id="n_s",
+                           paired_for="n_s", achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    added = tools.pool_add(storage, scope=scope,
+                           arguments={"text": "test thought"},
+                           now="2026-05-22T00:00:00Z")
+    return {"pool_id": added["pool_item"]["id"],
+            "session_id": "ses_1", "n_s": "n_s", "n_e": "n_e"}
+
+
+def test_pool_elevate_rejects_already_elevated(tmp_db_path: str) -> None:
+    """pool_elevate must refuse if the pool item is already elevated."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    ctx = _seed_pool_elevate_setup(storage)
+
+    # First elevation succeeds.
+    tools.pool_elevate(storage, scope="dpd",
+                       arguments={"pool_id": ctx["pool_id"],
+                                  "target_end_node_id": ctx["n_e"],
+                                  "type": "evidence",
+                                  "session_id": ctx["session_id"]},
+                       now="2026-05-22T01:00:00Z")
+
+    # Second elevation must raise with "already elevated".
+    with pytest.raises(ValueError, match="already elevated"):
+        tools.pool_elevate(storage, scope="dpd",
+                           arguments={"pool_id": ctx["pool_id"],
+                                      "target_end_node_id": ctx["n_e"],
+                                      "type": "evidence",
+                                      "session_id": ctx["session_id"]},
+                           now="2026-05-22T02:00:00Z")
+
+
+def test_pool_elevate_rejects_dropped(tmp_db_path: str) -> None:
+    """pool_elevate must refuse if the pool item was dropped."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    ctx = _seed_pool_elevate_setup(storage)
+
+    tools.pool_drop(storage, scope="dpd",
+                    arguments={"pool_id": ctx["pool_id"], "reason": "noise"},
+                    now="2026-05-22T01:00:00Z")
+
+    with pytest.raises(ValueError, match="is dropped"):
+        tools.pool_elevate(storage, scope="dpd",
+                           arguments={"pool_id": ctx["pool_id"],
+                                      "target_end_node_id": ctx["n_e"],
+                                      "type": "evidence",
+                                      "session_id": ctx["session_id"]},
+                           now="2026-05-22T02:00:00Z")
+
+
+def test_pool_elevate_rejects_non_active_end(tmp_db_path: str) -> None:
+    """pool_elevate must refuse if the target End node is not in state='active'."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    ctx = _seed_pool_elevate_setup(storage)
+
+    # Reach the End to move it to state='closed'.
+    tools.mark_reached(storage,
+                       arguments={"session_id": ctx["session_id"],
+                                  "end_node_id": ctx["n_e"]},
+                       now="2026-05-22T01:00:00Z")
+
+    # Elevation into a closed End must fail.
+    with pytest.raises(ValueError, match="state.*closed|closed.*state"):
+        tools.pool_elevate(storage, scope="dpd",
+                           arguments={"pool_id": ctx["pool_id"],
+                                      "target_end_node_id": ctx["n_e"],
+                                      "type": "evidence",
+                                      "session_id": ctx["session_id"]},
+                           now="2026-05-22T02:00:00Z")
+
+
+def test_pool_elevate_rejects_scope_mismatch(tmp_db_path: str) -> None:
+    """pool_elevate must refuse if the session scope doesn't match pool scope."""
+    from dpd_mcp_server import tools
+    storage = Storage.open(tmp_db_path)
+    # Pool is in scope "alpha", session is in scope "beta".
+    storage.get_or_create_scope_root(scope="alpha", now="2026-05-22T00:00:00Z")
+    storage.get_or_create_scope_root(scope="beta", now="2026-05-22T00:00:00Z")
+    storage.insert_session(session_id="ses_beta", scope="beta", label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r_beta", session_id="ses_beta", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s_b", session_id="ses_beta", node_type="start",
+                           text="s", parent_id="r_beta",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e_b", session_id="ses_beta", node_type="end",
+                           text="e", parent_id="n_s_b",
+                           paired_for="n_s_b", achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    added = tools.pool_add(storage, scope="alpha",
+                           arguments={"text": "alpha thought"},
+                           now="2026-05-22T00:00:00Z")
+    pid = added["pool_item"]["id"]
+
+    # Elevating an "alpha" pool item into a "beta" session must fail.
+    with pytest.raises(ValueError, match="scope.*does not match|does not match.*scope"):
+        tools.pool_elevate(storage, scope="alpha",
+                           arguments={"pool_id": pid,
+                                      "target_end_node_id": "n_e_b",
+                                      "type": "evidence",
+                                      "session_id": "ses_beta"},
+                           now="2026-05-22T02:00:00Z")
+
+
 def test_force_delete_node_tool(tmp_db_path: str) -> None:
     """Single-node force delete bypasses state preconditions."""
     from dpd_mcp_server import tools
