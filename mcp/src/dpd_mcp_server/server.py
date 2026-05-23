@@ -874,6 +874,30 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="find_similar",
+            title="Find similar subgraphs",
+            description=(
+                "Retrieve closed/archived subgraphs whose FTS5 index matches "
+                "the query. Default state filter: closed+archived. "
+                "include_open=True also runs a dynamic LIKE scan over active "
+                "subgraphs. v0.3.2."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string",
+                              "description": "Literal phrase to match (lowercased, ≥3 chars)."},
+                    "scope": {"type": ["string", "null"],
+                              "description": "Sub-scope filter (None = all sub-scopes in agent_scope)."},
+                    "top_k": {"type": "integer", "default": 5,
+                              "description": "Max number of subgraph summaries to return."},
+                    "include_open": {"type": "boolean", "default": False,
+                                     "description": "If True, also run dynamic LIKE scan over active subgraphs."},
+                },
+                "required": ["query"],
+            },
+        ),
     ]
     by_name = {t.name: t for t in tools}
     for old, new in LEGACY_ALIASES.items():
@@ -994,6 +1018,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.bulk_import_subgraph(
             storage=storage, arguments=tool_args, now=now
         )
+    if name == "find_similar":
+        return tools.find_similar(storage=storage, arguments=tool_args)
 
     raise ValueError(f"unknown tool: {name}")
 
