@@ -1379,6 +1379,7 @@ class Storage:
                 (now, now, now, session_id, *subgraph_ids),
             )
             self._touch_session(conn, session_id=session_id, now=now)
+        self._reindex_subgraph(start_node_id=start_id)
 
     def _subgraph_node_ids(
         self, conn: sqlite3.Connection, *, session_id: str, start_id: str,

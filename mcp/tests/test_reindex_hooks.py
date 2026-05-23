@@ -150,3 +150,53 @@ def test_reindex_subgraph_groups_by_node_type(tmp_db_path: str) -> None:
     assert "BODY decision text" not in row[1]
     assert "JOURNEY hypothesis text" in row[1]
     assert "JOURNEY hypothesis text" not in row[0]
+
+
+def test_mark_reached_reindexes_subgraph(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    now = "2026-05-23T00:00:00Z"
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) "
+            "VALUES ('ses_m', ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('root_m', 'ses_m', 'r', 'active', ?)",
+            (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, created_at, updated_at) "
+            "VALUES ('n_s', 'ses_m', 'start', 'Start about REINDEX-TEST topic', "
+            "'open', 'root_m', 'root', 'active', ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, paired_for, achievement_conditions, state, created_at, "
+            "updated_at) "
+            "VALUES ('n_e', 'ses_m', 'end', 'End for REINDEX-TEST', 'open', "
+            "'n_s', 'node', 'n_s', 'all done', 'active', ?, ?)",
+            (now, now),
+        )
+
+    # FTS should be empty before mark_reached (subgraph is active)
+    with storage.connect() as conn:
+        count_before = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = 'n_s'"
+        ).fetchone()[0]
+    assert count_before == 0
+
+    storage.mark_reached(session_id="ses_m", end_node_id="n_e", now=now)
+
+    with storage.connect() as conn:
+        count_after = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = 'n_s'"
+        ).fetchone()[0]
+        anchor = conn.execute(
+            "SELECT anchor_text FROM subgraphs_fts WHERE start_node_id = 'n_s'"
+        ).fetchone()[0]
+    assert count_after == 1
+    assert "REINDEX-TEST" in anchor
