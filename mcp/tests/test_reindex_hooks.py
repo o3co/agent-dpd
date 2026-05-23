@@ -273,3 +273,46 @@ def test_delete_subgraph_removes_fts_row(tmp_db_path: str) -> None:
             (sn,),
         ).fetchone()[0]
     assert after == 0
+
+
+def test_force_delete_start_node_removes_fts_row(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    sid, sn, _en = _seed_closed_subgraph(storage)
+    storage._reindex_subgraph(start_node_id=sn)
+
+    with storage.connect() as conn:
+        before = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?",
+            (sn,),
+        ).fetchone()[0]
+    assert before == 1
+
+    now2 = "2026-05-23T00:02:00Z"
+    storage.force_delete_node(session_id=sid, node_id=sn, now=now2)
+
+    with storage.connect() as conn:
+        after = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?",
+            (sn,),
+        ).fetchone()[0]
+    assert after == 0
+
+
+def test_force_delete_non_start_node_keeps_fts_row(tmp_db_path: str) -> None:
+    """force_delete on a non-start node should not touch the FTS row.
+
+    (The subgraph identity is the start_node_id, which still exists.)
+    """
+    storage = Storage.open(tmp_db_path)
+    sid, sn, en = _seed_closed_subgraph(storage)
+    storage._reindex_subgraph(start_node_id=sn)
+    now2 = "2026-05-23T00:03:00Z"
+
+    storage.force_delete_node(session_id=sid, node_id=en, now=now2)
+
+    with storage.connect() as conn:
+        after = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?",
+            (sn,),
+        ).fetchone()[0]
+    assert after == 1

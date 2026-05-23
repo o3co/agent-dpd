@@ -1817,7 +1817,20 @@ class Storage:
         2. Tombstones pool_items elevated into this node (NULL + dropped_at + tag)
            to prevent silent reactivation of the pool item.
         3. Deletes referencing edges, then the node itself.
+        4. If the target is a start node, drops its FTS row (subgraph identity gone).
         """
+        with self.connect() as conn:
+            is_start = conn.execute(
+                "SELECT 1 FROM nodes WHERE session_id = ? AND id = ? "
+                "AND type = 'start'",
+                (session_id, node_id),
+            ).fetchone() is not None
+            if is_start:
+                conn.execute(
+                    "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
+                    (node_id,),
+                )
+
         with self.connect() as conn:
             # Null paired_for references TO this node (e.g. its paired End node)
             conn.execute(
