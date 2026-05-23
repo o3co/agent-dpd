@@ -1066,6 +1066,96 @@ class Storage:
             return ""
         return cleaned
 
+    def find_similar(
+        self,
+        *,
+        query: str,
+        scope: str | None = None,
+        top_k: int = 5,
+        include_open: bool = False,
+    ) -> list[dict]:
+        """Retrieve up to top_k subgraphs whose FTS document matches query.
+
+        Default: state IN ('closed', 'archived'). With include_open=True,
+        an additional dynamic LIKE scan covers state='active' subgraphs and
+        results are concatenated (closed/archived first).
+
+        bm25 returns lower-is-better; we return -bm25 so caller sees
+        higher-is-better scores.
+        """
+        normalized = self._normalize_query(query)
+        if not normalized:
+            return []
+
+        match_expr = '"' + normalized.replace('"', '""') + '"'
+        eligible_rows: list[dict] = []
+        with self.connect() as conn:
+            fts_rows = conn.execute(
+                """
+                SELECT
+                    f.start_node_id AS start_node_id,
+                    f.session_id    AS session_id,
+                    f.anchor_text   AS anchor_text,
+                    -bm25(subgraphs_fts, 3.0, 2.0, 1.0) AS score,
+                    snippet(subgraphs_fts, 2, '[', ']', '…', 16) AS snippet
+                FROM subgraphs_fts f
+                WHERE subgraphs_fts MATCH ?
+                ORDER BY bm25(subgraphs_fts, 3.0, 2.0, 1.0)
+                LIMIT ?
+                """,
+                (match_expr, top_k * 4),
+            ).fetchall()
+
+            for r in fts_rows:
+                start_node_id = r["start_node_id"]
+                node = conn.execute(
+                    "SELECT id, state, archived_at, closed_at, text, paired_for "
+                    "FROM nodes WHERE id = ?",
+                    (start_node_id,),
+                ).fetchone()
+                if node is None:
+                    continue
+                root_row = conn.execute(
+                    "SELECT roots.id AS root_id, roots.scope AS scope "
+                    "FROM nodes "
+                    "JOIN roots ON nodes.parent_id = roots.id "
+                    "WHERE nodes.id = ? AND nodes.parent_kind = 'root'",
+                    (start_node_id,),
+                ).fetchone()
+                if root_row is None:
+                    continue
+                if scope is not None and (root_row["scope"] or None) != scope:
+                    continue
+                end_row = conn.execute(
+                    "SELECT text, achievement_conditions FROM nodes "
+                    "WHERE paired_for = ? AND type = 'end' "
+                    "ORDER BY created_at LIMIT 1",
+                    (start_node_id,),
+                ).fetchone()
+                eligible_rows.append({
+                    "start_node_id": start_node_id,
+                    "session_id": r["session_id"],
+                    "root_id": root_row["root_id"],
+                    "scope": root_row["scope"] or None,
+                    "start_text": node["text"],
+                    "end_text": end_row["text"] if end_row else None,
+                    "achievement_conditions": (
+                        end_row["achievement_conditions"] if end_row else None
+                    ),
+                    "state": node["state"],
+                    "score": float(r["score"]),
+                    "matched_snippet": r["snippet"],
+                    "closed_at": node["closed_at"] or node["archived_at"],
+                })
+                if len(eligible_rows) >= top_k:
+                    break
+
+        if not include_open:
+            return eligible_rows[:top_k]
+
+        # Open fallback wired in Task 11 (just return eligible for now).
+        return eligible_rows[:top_k]
+
     # -----------------------------------------------------------------------
     # v0.3 Task 2: scope_root resolution + pool_items CRUD
     # -----------------------------------------------------------------------
