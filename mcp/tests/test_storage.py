@@ -34,13 +34,13 @@ def test_insert_session_round_trips_through_get(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     storage.insert_session(
         session_id="ses_abc",
-        scope="decompose-propagate.protocol",
+        scope="dev.dpd",
         label="exploration",
         now="2026-05-20T10:00:00Z",
     )
 
     row = storage.get_session(session_id="ses_abc")
-    assert row["scope"] == "decompose-propagate.protocol"
+    assert row["scope"] == "dev.dpd"
     assert row["label"] == "exploration"
     assert row["started_at"] == "2026-05-20T10:00:00Z"
     assert row["updated_at"] == "2026-05-20T10:00:00Z"

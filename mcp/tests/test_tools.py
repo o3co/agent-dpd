@@ -35,7 +35,7 @@ def storage(tmp_db_path: str) -> Storage:
 def test_start_session_returns_new_id_and_persists(storage: Storage) -> None:
     result = start_session(
         storage=storage,
-        arguments={"scope": "decompose-propagate.protocol", "label": "exp"},
+        arguments={"scope": "dev.dpd", "label": "exp"},
         now="2026-05-20T10:00:00Z",
         new_id=lambda prefix: f"{prefix}_fixed",
     )
@@ -43,7 +43,7 @@ def test_start_session_returns_new_id_and_persists(storage: Storage) -> None:
     assert result == {"session_id": "ses_fixed"}
 
     row = storage.get_session(session_id="ses_fixed")
-    assert row["scope"] == "decompose-propagate.protocol"
+    assert row["scope"] == "dev.dpd"
     assert row["label"] == "exp"
 
 
@@ -82,7 +82,7 @@ def test_get_session_state_returns_session_plus_active_roots(
 ) -> None:
     start_session(
         storage=storage,
-        arguments={"scope": "decompose-propagate.protocol", "label": "exp"},
+        arguments={"scope": "dev.dpd", "label": "exp"},
         now="2026-05-20T10:00:00Z",
         new_id=lambda p: "ses_1",
     )
@@ -104,7 +104,7 @@ def test_get_session_state_returns_session_plus_active_roots(
     )
 
     assert result["session"]["id"] == "ses_1"
-    assert result["session"]["scope"] == "decompose-propagate.protocol"
+    assert result["session"]["scope"] == "dev.dpd"
     assert result["session"]["label"] == "exp"
     assert result["session"]["focus_node_id"] is None
     assert [r["id"] for r in result["active_roots"]] == ["root_a", "root_b"]
