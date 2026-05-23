@@ -245,3 +245,31 @@ def test_bulk_import_subgraph_reindexes_archived(tmp_db_path: str) -> None:
     assert anchor is not None
     assert "KEYWORD-A" in anchor[0]
     assert "KEYWORD-B" in anchor[0]
+
+
+def test_delete_subgraph_removes_fts_row(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    sid, sn, en = _seed_closed_subgraph(storage)
+    storage._reindex_subgraph(start_node_id=sn)
+
+    # Pre-condition: FTS row exists
+    with storage.connect() as conn:
+        before = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?",
+            (sn,),
+        ).fetchone()[0]
+    assert before == 1
+
+    # Transition through closed → deletable so delete_subgraph accepts.
+    now2 = "2026-05-23T00:01:00Z"
+    storage.dump_persist_subgraph(
+        session_id=sid, start_node_id=sn, destination=None, now=now2
+    )
+    storage.delete_subgraph(session_id=sid, start_node_id=sn, now=now2)
+
+    with storage.connect() as conn:
+        after = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?",
+            (sn,),
+        ).fetchone()[0]
+    assert after == 0

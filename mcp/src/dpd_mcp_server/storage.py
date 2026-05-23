@@ -1481,6 +1481,11 @@ class Storage:
                 (session_id, *members),
             )
             self._touch_session(conn, session_id=session_id, now=now)
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
+                (start_node_id,),
+            )
 
     # ------------------------------------------------------------------
     # v0.3.1 Task 6: session mode lifecycle
