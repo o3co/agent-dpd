@@ -1153,8 +1153,58 @@ class Storage:
         if not include_open:
             return eligible_rows[:top_k]
 
-        # Open fallback wired in Task 11 (just return eligible for now).
-        return eligible_rows[:top_k]
+        # Open fallback: dynamic LIKE scan over active start nodes.
+        remaining = top_k - len(eligible_rows)
+        if remaining <= 0:
+            return eligible_rows
+        like_expr = "%" + normalized.replace("\\", "\\\\")\
+                                    .replace("%", "\\%")\
+                                    .replace("_", "\\_") + "%"
+        with self.connect() as conn:
+            active_starts = conn.execute(
+                """
+                SELECT n.id AS start_node_id, n.session_id, n.text AS start_text,
+                       roots.id AS root_id, roots.scope AS scope
+                FROM nodes n
+                JOIN roots ON n.parent_id = roots.id
+                WHERE n.type = 'start'
+                  AND n.state = 'active'
+                  AND n.parent_kind = 'root'
+                """
+            ).fetchall()
+            open_results: list[dict] = []
+            for r in active_starts:
+                if scope is not None and (r["scope"] or None) != scope:
+                    continue
+                end_row = conn.execute(
+                    "SELECT text, achievement_conditions FROM nodes "
+                    "WHERE paired_for = ? AND type = 'end' "
+                    "ORDER BY created_at LIMIT 1",
+                    (r["start_node_id"],),
+                ).fetchone()
+                end_text = end_row["text"] if end_row else ""
+                ach = end_row["achievement_conditions"] if end_row else ""
+                blob = " ".join([
+                    (r["start_text"] or "").lower(),
+                    (end_text or "").lower(),
+                    (ach or "").lower(),
+                ])
+                if normalized in blob:
+                    open_results.append({
+                        "start_node_id": r["start_node_id"],
+                        "session_id": r["session_id"],
+                        "root_id": r["root_id"],
+                        "scope": r["scope"] or None,
+                        "start_text": r["start_text"],
+                        "end_text": end_text or None,
+                        "achievement_conditions": ach or None,
+                        "state": "active",
+                        "score": float(blob.count(normalized)),
+                        "matched_snippet": None,
+                        "closed_at": None,
+                    })
+            open_results.sort(key=lambda x: x["score"], reverse=True)
+            return eligible_rows + open_results[:remaining]
 
     # -----------------------------------------------------------------------
     # v0.3 Task 2: scope_root resolution + pool_items CRUD

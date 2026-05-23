@@ -133,3 +133,37 @@ def test_find_similar_returns_archived_subgraphs(tmp_db_path: str) -> None:
     results = storage.find_similar(query="archived-keyword", top_k=5)
     assert len(results) == 1
     assert results[0]["state"] == "archived"
+
+
+def test_find_similar_include_open_adds_active(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_closed_subgraphs(storage)
+    now = "2026-05-23T00:00:00Z"
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) "
+            "VALUES ('ses_open', ?, ?)", (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('root_open', 'ses_open', 'r', 'active', ?)", (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, created_at, updated_at) "
+            "VALUES ('s_open', 'ses_open', 'start', 'trigram in active start', "
+            "'open', 'root_open', 'root', 'active', ?, ?)",
+            (now, now),
+        )
+
+    closed_only = storage.find_similar(query="trigram", include_open=False)
+    with_open = storage.find_similar(query="trigram", include_open=True)
+
+    assert "s_open" not in {r["start_node_id"] for r in closed_only}
+    assert "s_open" in {r["start_node_id"] for r in with_open}
+    # Eligible (closed/archived) must come before open in the merged list.
+    indices_eligible = [
+        i for i, r in enumerate(with_open) if r["state"] != "active"
+    ]
+    indices_open = [i for i, r in enumerate(with_open) if r["state"] == "active"]
+    assert all(ie < io for ie in indices_eligible for io in indices_open)
