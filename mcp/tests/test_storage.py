@@ -2441,3 +2441,88 @@ def test_subgraphs_fts_uses_trigram_tokenizer(tmp_db_path: str) -> None:
             "SELECT sql FROM sqlite_master WHERE name='subgraphs_fts'"
         ).fetchone()[0]
     assert "trigram" in sql.lower()
+
+
+def test_open_chains_v3_v4_v5_migrations(tmp_db_path: str) -> None:
+    """A genuine v3 DB should arrive at user_version=5 via the chain."""
+    import sqlite3
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.executescript("""
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, scope TEXT, label TEXT,
+                started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                focus_node_id TEXT
+            );
+            CREATE TABLE roots (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id),
+                topic TEXT NOT NULL,
+                lifecycle TEXT NOT NULL
+                  CHECK (lifecycle IN ('active','archived','deferred')),
+                spawned_at TEXT NOT NULL,
+                last_focused_at TEXT
+            );
+            CREATE TABLE nodes (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id),
+                type TEXT NOT NULL,
+                text TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('open','closed')),
+                closure_reason TEXT,
+                parent_id TEXT NOT NULL,
+                parent_kind TEXT NOT NULL CHECK (parent_kind IN ('root','node')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE edges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id),
+                from_node TEXT NOT NULL, to_node TEXT NOT NULL,
+                type TEXT NOT NULL, reason TEXT,
+                created_at TEXT NOT NULL
+            );
+            PRAGMA user_version = 2;
+        """)
+    Storage.open(tmp_db_path)
+    with sqlite3.connect(tmp_db_path) as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        names = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+    assert version == 5
+    assert "subgraphs_fts" in names
+
+
+def test_open_v4_db_runs_v4_to_v5_backfill(tmp_db_path: str) -> None:
+    """An existing v4 DB with closed subgraphs gets them backfilled into FTS on open()."""
+    import sqlite3
+    now = "2026-05-23T00:00:00Z"
+    Storage.open(tmp_db_path)  # gives us v5 schema
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) "
+            "VALUES ('s', ?, ?)", (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('r', 's', 't', 'active', ?)", (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, closed_at, created_at, updated_at) "
+            "VALUES ('ns', 's', 'start', 'OPEN-AGAIN start', 'closed', 'r', "
+            "'root', 'closed', ?, ?, ?)", (now, now, now),
+        )
+        conn.execute("DELETE FROM subgraphs_fts")
+        conn.execute("DROP TABLE subgraphs_fts")
+        conn.execute("PRAGMA user_version = 4")
+
+    Storage.open(tmp_db_path)  # second open should trigger v4→v5 migration
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        anchor = conn.execute(
+            "SELECT anchor_text FROM subgraphs_fts WHERE start_node_id = 'ns'"
+        ).fetchone()
+    assert version == 5
+    assert anchor is not None and "OPEN-AGAIN" in anchor[0]

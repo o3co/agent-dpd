@@ -25,9 +25,11 @@ class Storage:
 
         Migration chain on pre-existing databases:
           - user_version = 2: run _migrate_v2_to_v3 (structural rebuild),
-            then migrate_v3_to_v4 (ALTER TABLE + partial index).
-          - user_version = 3: run migrate_v3_to_v4 only.
-          - user_version >= 4: no migration needed; schema.sql is applied
+            then migrate_v3_to_v4 (ALTER TABLE + partial index),
+            then migrate_v4_to_v5 (FTS table + backfill).
+          - user_version = 3: run migrate_v3_to_v4 then migrate_v4_to_v5.
+          - user_version = 4: run migrate_v4_to_v5 only.
+          - user_version >= 5: no migration needed; schema.sql is applied
             (CREATE TABLE IF NOT EXISTS is idempotent).
 
         SQLite limitation: ALTER TABLE cannot add CHECK constraints, so the
@@ -36,12 +38,13 @@ class Storage:
         is enforced at runtime by the Task 4 migration script.
         """
         from .migrate_v3_to_v4 import migrate as _migrate_v3_to_v4
+        from .migrate_v4_to_v5 import migrate as _migrate_v4_to_v5
 
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
         # Read user_version BEFORE running schema.sql so we can dispatch to the
-        # correct migration path.  schema.sql unconditionally sets user_version=4,
-        # so reading the version after executescript() would always return 4 and
+        # correct migration path.  schema.sql unconditionally sets user_version=5,
+        # so reading the version after executescript() would always return 5 and
         # make the v3→v4 branch unreachable for genuine v3 databases.
         with sqlite3.connect(db_path) as conn:
             pre_schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -72,8 +75,12 @@ class Storage:
                     )
                 """)
             _migrate_v3_to_v4(db_path=db_path)
+            _migrate_v4_to_v5(db_path=db_path)
         elif pre_schema_version == 3:
             _migrate_v3_to_v4(db_path=db_path)
+            _migrate_v4_to_v5(db_path=db_path)
+        elif pre_schema_version == 4:
+            _migrate_v4_to_v5(db_path=db_path)
 
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
