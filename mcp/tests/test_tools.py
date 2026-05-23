@@ -2436,3 +2436,46 @@ def test_list_sessions_invalid_list_member_raises(tmp_db_path: str) -> None:
 
     with pytest.raises(ValueError, match="bogus|invalid"):
         list_sessions(storage=storage, arguments={"mode_filter": ["entry", "bogus"]})
+
+
+# ---------------------------------------------------------------------------
+# Task 12 (v0.3.2): find_similar tool business-logic function
+# ---------------------------------------------------------------------------
+
+
+def test_find_similar_returns_list_of_dicts(tmp_db_path: str) -> None:
+    from dpd_mcp_server.tools import find_similar
+    storage = Storage.open(tmp_db_path)
+    now = "2026-05-23T00:00:00Z"
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) "
+            "VALUES ('s', ?, ?)", (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('r', 's', 't', 'active', ?)", (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, closed_at, created_at, updated_at) "
+            "VALUES ('ns', 's', 'start', 'UNIQUE-SLUG-Q1', 'closed', 'r', "
+            "'root', 'closed', ?, ?, ?)", (now, now, now),
+        )
+    storage._reindex_subgraph(start_node_id="ns")
+
+    out = find_similar(
+        storage=storage,
+        arguments={"query": "unique-slug-q1", "top_k": 5},
+    )
+    assert "results" in out
+    assert isinstance(out["results"], list)
+    assert len(out["results"]) == 1
+    assert out["results"][0]["start_node_id"] == "ns"
+
+
+def test_find_similar_requires_query(tmp_db_path: str) -> None:
+    from dpd_mcp_server.tools import find_similar
+    storage = Storage.open(tmp_db_path)
+    with pytest.raises(ValueError):
+        find_similar(storage=storage, arguments={})
