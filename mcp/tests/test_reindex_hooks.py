@@ -200,3 +200,48 @@ def test_mark_reached_reindexes_subgraph(tmp_db_path: str) -> None:
         ).fetchone()[0]
     assert count_after == 1
     assert "REINDEX-TEST" in anchor
+
+
+def test_bulk_import_subgraph_reindexes_archived(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    now = "2026-05-23T00:00:00Z"
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) "
+            "VALUES ('ses_b', ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('root_b', 'ses_b', 'r', 'active', ?)",
+            (now,),
+        )
+
+    storage.bulk_import_subgraph(
+        session_id="ses_b",
+        root_id="root_b",
+        nodes=[
+            {
+                "id": "imp_s", "type": "start", "text": "Imported start KEYWORD-A",
+                "parent_id": "root_b", "parent_kind": "root",
+            },
+            {
+                "id": "imp_e", "type": "end", "text": "Imported end KEYWORD-B",
+                "parent_id": "imp_s", "parent_kind": "node",
+                "paired_for": "imp_s",
+                "achievement_conditions": "imported done",
+            },
+        ],
+        edges=[],
+        provenance="imported",
+        state="archived",
+        now=now,
+    )
+
+    with storage.connect() as conn:
+        anchor = conn.execute(
+            "SELECT anchor_text FROM subgraphs_fts WHERE start_node_id = 'imp_s'"
+        ).fetchone()
+    assert anchor is not None
+    assert "KEYWORD-A" in anchor[0]
+    assert "KEYWORD-B" in anchor[0]

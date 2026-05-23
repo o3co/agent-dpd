@@ -1781,6 +1781,11 @@ class Storage:
                 ).fetchone()
                 imported_nodes.append({k: row[k] for k in row.keys()})
 
+        # Reindex any imported start nodes whose state is closed or archived.
+        for n in nodes:
+            if n["type"] == "start":
+                self._reindex_subgraph(start_node_id=n["id"])
+
         return {
             "imported_nodes": imported_nodes,
             "imported_edges": inserted_edges,
