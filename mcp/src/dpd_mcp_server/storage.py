@@ -1053,6 +1053,19 @@ class Storage:
                 ),
             )
 
+    @staticmethod
+    def _normalize_query(query: str) -> str:
+        """Strip, lowercase, and reject queries shorter than 3 chars.
+
+        Empty return means "skip search" — callers return an empty result list.
+        """
+        if query is None:
+            return ""
+        cleaned = query.strip().lower()
+        if len(cleaned) < 3:
+            return ""
+        return cleaned
+
     # -----------------------------------------------------------------------
     # v0.3 Task 2: scope_root resolution + pool_items CRUD
     # -----------------------------------------------------------------------
