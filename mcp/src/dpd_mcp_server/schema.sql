@@ -110,4 +110,14 @@ CREATE INDEX IF NOT EXISTS idx_pool_active ON pool_items(scope_root_id)
 CREATE INDEX IF NOT EXISTS idx_pool_rejected ON pool_items(scope_root_id, created_at)
     WHERE rejected_at IS NULL;
 
-PRAGMA user_version = 4;
+CREATE VIRTUAL TABLE IF NOT EXISTS subgraphs_fts USING fts5(
+    start_node_id UNINDEXED,
+    session_id    UNINDEXED,
+    anchor_text,
+    body_text,
+    journey_text,
+    closed_at     UNINDEXED,
+    tokenize = 'trigram'
+);
+
+PRAGMA user_version = 5;
