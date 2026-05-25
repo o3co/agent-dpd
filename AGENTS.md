@@ -16,7 +16,7 @@ The MCP server is stateless w.r.t. conversation; the skill is stateless w.r.t. g
 
 Requires Python 3.11+.
 
-The simplest path is `./install.sh` from the repo root (or `make install`, which wraps it). It creates the venv, installs the package in editable mode with dev deps, and registers the server with Claude Code. Env overrides (`DPD_INSTALL_DIR`, `DPD_PYTHON`, `DPD_NO_REGISTER`) are documented in [install.sh](install.sh).
+The simplest path is `./install.sh` from the repo root (or `make install`, which wraps it). It creates the venv, installs the package in editable mode with dev deps, registers the server with Claude Code, and symlinks `/dpd` plus sub-skills into `~/.claude/skills/`. Env overrides (`DPD_INSTALL_DIR`, `DPD_PYTHON`, `DPD_NO_REGISTER`, `DPD_NO_SKILL_LINK`) are documented in [install.sh](install.sh).
 
 If you need to know what install.sh actually does (e.g., to debug or customize):
 
@@ -27,9 +27,17 @@ mcp/.venv/bin/pip install -e 'mcp[dev]'
 
 # register with Claude Code (one-time)
 claude mcp add dpd-mcp-server -- "$(pwd)/mcp/.venv/bin/dpd-mcp-server"
+
+# link skills (so /dpd and sub-commands are discoverable)
+mkdir -p "$HOME/.claude/skills"
+ln -sfn "$(pwd)/skill" "$HOME/.claude/skills/dpd"
+for d in skill/*/; do
+  name=$(basename "$d")
+  [ -f "$d/SKILL.md" ] && ln -sfn "$(pwd)/$d" "$HOME/.claude/skills/$name"
+done
 ```
 
-Restart Claude Code after registration so the `mcp__dpd-mcp-server__*` tools become discoverable.
+Restart Claude Code after registration so the `mcp__dpd-mcp-server__*` tools and `/dpd*` skills become discoverable.
 
 Runtime data lives at `~/.claude/dpd-server/data/<encoded-agent-scope>/graph.sqlite`. Override with `DPD_DATA_DIR` env var (tests use this to avoid touching real data).
 

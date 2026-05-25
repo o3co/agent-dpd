@@ -20,7 +20,7 @@ Requires Python 3.11+ and [Claude Code](https://docs.anthropic.com/en/docs/claud
 curl -fsSL https://raw.githubusercontent.com/o3co/agent-dpd/main/install.sh | bash
 ```
 
-That single command clones the repo (to `~/agent-dpd` by default), creates a venv, installs the package, and registers `dpd-mcp-server` with Claude Code. Restart Claude Code afterwards so the `/dpd` skill becomes discoverable.
+That single command clones the repo (to `~/agent-dpd` by default), creates a venv, installs the package, registers `dpd-mcp-server` with Claude Code, and symlinks the `/dpd` skill (plus sub-skills like `/dpd-status`, `/dpd-dump`, …) into `~/.claude/skills/`. Restart Claude Code afterwards so the new MCP server and skills become discoverable.
 
 If you'd rather review the script first:
 
@@ -36,7 +36,8 @@ cd agent-dpd
 | --- | --- | --- |
 | `DPD_INSTALL_DIR` | `$HOME/agent-dpd` | Where to clone the repo |
 | `DPD_PYTHON` | `python3.11` | Python interpreter to use |
-| `DPD_NO_REGISTER` | unset | Set to skip Claude Code registration |
+| `DPD_NO_REGISTER` | unset | Set to skip Claude Code MCP registration |
+| `DPD_NO_SKILL_LINK` | unset | Set to skip symlinking skills into `~/.claude/skills/` |
 
 Manual steps (no install.sh) are in [AGENTS.md](AGENTS.md#setup).
 
