@@ -34,7 +34,18 @@ Allowed payload:
    - OS name + version (`uname -a` minimized to OS family)
    - Optional: stack trace if the user opted to attach one for an error case
 
-If the user wants to attach graph context for a bug report, the skill MUST ask them to manually copy-paste the specific part they choose to share. The skill MUST NOT call `export_mermaid`, `export_yaml`, `get_node`, `get_session_state`, `walk_subtree`, `list_open_nodes`, `pool_list`, or any other tool that reads graph content for the purpose of this skill.
+If the user wants to attach graph context for a bug report, the skill MUST ask them to manually copy-paste the specific part they choose to share.
+
+**Tool-call policy (allow-list, NOT deny-list):**
+
+The skill MUST NOT call ANY `mcp__dpd-mcp-server__*` tool for the purpose of composing the feedback body. This is a categorical prohibition — every DPD MCP tool is forbidden in this skill's scope, including but not limited to `export_mermaid`, `export_yaml`, `get_node`, `get_session_state`, `walk_subtree`, `list_open_nodes`, `list_active_roots`, `list_sessions`, `list_edges`, `find_similar`, `pool_list`, `dump_persist`. The enumeration is illustrative; the rule is the categorical one.
+
+The only data sources allowed for the feedback body are:
+1. The user's free-text input (the `<short description>` argument and follow-ups)
+2. The system metadata listed under "Allowed payload" above (read via shell, NOT via MCP)
+3. Stack trace text the user explicitly pastes in
+
+If you (Claude) find yourself tempted to call a DPD MCP tool here for "convenience" or "useful context", STOP. The convenience is what the constraint exists to prevent — auto-included graph context denies the user the choice of what to share.
 
 **Why this is non-negotiable:**
 
