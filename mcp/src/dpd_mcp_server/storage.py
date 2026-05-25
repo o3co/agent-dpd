@@ -1116,9 +1116,10 @@ class Storage:
                 if node is None:
                     continue
                 root_row = conn.execute(
-                    "SELECT roots.id AS root_id, roots.scope AS scope "
+                    "SELECT roots.id AS root_id, sessions.scope AS scope "
                     "FROM nodes "
                     "JOIN roots ON nodes.parent_id = roots.id "
+                    "JOIN sessions ON nodes.session_id = sessions.id "
                     "WHERE nodes.id = ? AND nodes.parent_kind = 'root'",
                     (start_node_id,),
                 ).fetchone()
@@ -1164,9 +1165,10 @@ class Storage:
             active_starts = conn.execute(
                 """
                 SELECT n.id AS start_node_id, n.session_id, n.text AS start_text,
-                       roots.id AS root_id, roots.scope AS scope
+                       roots.id AS root_id, sessions.scope AS scope
                 FROM nodes n
                 JOIN roots ON n.parent_id = roots.id
+                JOIN sessions ON n.session_id = sessions.id
                 WHERE n.type = 'start'
                   AND n.state = 'active'
                   AND n.parent_kind = 'root'
@@ -1184,10 +1186,30 @@ class Storage:
                 ).fetchone()
                 end_text = end_row["text"] if end_row else ""
                 ach = end_row["achievement_conditions"] if end_row else ""
+
+                # Mirror _reindex_subgraph: include all descendant text in the
+                # searchable blob so a match in a decision/rationale child is
+                # discoverable in include_open mode.
+                descendant_ids = self._subgraph_node_ids(
+                    conn, session_id=r["session_id"], start_id=r["start_node_id"]
+                )
+                descendant_texts: list[str] = []
+                if descendant_ids:
+                    placeholders = ",".join("?" * len(descendant_ids))
+                    descendant_rows = conn.execute(
+                        f"SELECT text FROM nodes "
+                        f"WHERE session_id = ? AND id IN ({placeholders})",
+                        (r["session_id"], *descendant_ids),
+                    ).fetchall()
+                    descendant_texts = [
+                        (row["text"] or "").lower() for row in descendant_rows
+                    ]
+
                 blob = " ".join([
                     (r["start_text"] or "").lower(),
                     (end_text or "").lower(),
                     (ach or "").lower(),
+                    *descendant_texts,
                 ])
                 if normalized in blob:
                     open_results.append({

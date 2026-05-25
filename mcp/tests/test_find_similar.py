@@ -167,3 +167,102 @@ def test_find_similar_include_open_adds_active(tmp_db_path: str) -> None:
     ]
     indices_open = [i for i, r in enumerate(with_open) if r["state"] == "active"]
     assert all(ie < io for ie in indices_eligible for io in indices_open)
+
+
+def test_find_similar_filters_by_session_scope(tmp_db_path: str) -> None:
+    """scope filter must compare against sessions.scope, not roots.scope.
+
+    Codex P2 #1: roots.scope is NULL for normal roots; sub-scope lives on
+    sessions.scope. Without this fix, scope filter returns nothing for
+    real-world data.
+    """
+    storage = Storage.open(tmp_db_path)
+    now = "2026-05-24T00:00:00Z"
+    with storage.connect() as conn:
+        # Session A in sub-scope "alpha"
+        conn.execute(
+            "INSERT INTO sessions (id, scope, started_at, updated_at) "
+            "VALUES ('ses_a', 'alpha', ?, ?)", (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('root_a', 'ses_a', 'r', 'active', ?)", (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, closed_at, created_at, updated_at) "
+            "VALUES ('s_a', 'ses_a', 'start', 'NEEDLE-ALPHA start', 'closed', "
+            "'root_a', 'root', 'closed', ?, ?, ?)", (now, now, now),
+        )
+        # Session B in sub-scope "beta"
+        conn.execute(
+            "INSERT INTO sessions (id, scope, started_at, updated_at) "
+            "VALUES ('ses_b', 'beta', ?, ?)", (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('root_b', 'ses_b', 'r', 'active', ?)", (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, closed_at, created_at, updated_at) "
+            "VALUES ('s_b', 'ses_b', 'start', 'NEEDLE-BETA start', 'closed', "
+            "'root_b', 'root', 'closed', ?, ?, ?)", (now, now, now),
+        )
+    storage._reindex_subgraph(start_node_id="s_a")
+    storage._reindex_subgraph(start_node_id="s_b")
+
+    # Without scope filter: both found
+    all_results = storage.find_similar(query="needle")
+    assert {r["start_node_id"] for r in all_results} == {"s_a", "s_b"}
+
+    # With scope='alpha': only s_a (filter via sessions.scope)
+    alpha = storage.find_similar(query="needle", scope="alpha")
+    assert {r["start_node_id"] for r in alpha} == {"s_a"}
+    assert alpha[0]["scope"] == "alpha"
+
+    # With scope='beta': only s_b
+    beta = storage.find_similar(query="needle", scope="beta")
+    assert {r["start_node_id"] for r in beta} == {"s_b"}
+    assert beta[0]["scope"] == "beta"
+
+
+def test_find_similar_include_open_blob_includes_descendants(tmp_db_path: str) -> None:
+    """include_open=True must scan child node text (decisions/rationales),
+    mirroring how _reindex_subgraph composes body_text/journey_text for closed.
+
+    Codex P2 #3: currently only start+end+ach are in the blob, so a query that
+    matches only a decision child is silently missed.
+    """
+    storage = Storage.open(tmp_db_path)
+    now = "2026-05-24T00:00:00Z"
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) "
+            "VALUES ('ses_o', ?, ?)", (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('root_o', 'ses_o', 'r', 'active', ?)", (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, created_at, updated_at) "
+            "VALUES ('s_o', 'ses_o', 'start', 'unrelated start text', 'open', "
+            "'root_o', 'root', 'active', ?, ?)", (now, now),
+        )
+        # Decision child contains the keyword we'll search for.
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, created_at, updated_at) "
+            "VALUES ('d_o', 'ses_o', 'decision', 'DEEPCHILD-KEYWORD decision text', "
+            "'open', 's_o', 'node', 'active', ?, ?)", (now, now),
+        )
+
+    # Without include_open: nothing (subgraph not in FTS)
+    closed_only = storage.find_similar(query="deepchild-keyword", include_open=False)
+    assert closed_only == []
+
+    # With include_open: subgraph found because decision child text is now in blob
+    with_open = storage.find_similar(query="deepchild-keyword", include_open=True)
+    assert {r["start_node_id"] for r in with_open} == {"s_o"}
