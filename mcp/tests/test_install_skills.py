@@ -1,13 +1,8 @@
-"""Tests for install.sh's skill-linking logic.
+# Lives under mcp/tests/ rather than a repo-root tests/ because mcp/.venv is the
+# only venv and mcp/pyproject.toml is the only pytest config — keeping it here
+# means `make test` covers both the MCP server and the installer in one pass.
 
-Lives under mcp/tests/ rather than a repo-root tests/ dir because mcp/.venv is
-the only venv in the repo and mcp/pyproject.toml is the only pytest config.
-Keeping the test here means `make test` (which delegates to that pytest config)
-exercises both the Python MCP server and the installer in one pass.
-
-Sources install.sh in a bash subprocess (BASH_SOURCE guard prevents main() from
-running) and exercises the link_skills function against a fixture skill tree.
-"""
+"""Tests for install.sh's skill-linking logic."""
 
 from __future__ import annotations
 
