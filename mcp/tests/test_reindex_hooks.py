@@ -428,12 +428,15 @@ def test_force_delete_start_node_is_atomic(tmp_db_path: str) -> None:
 
 
 def test_delete_subgraph_is_atomic(tmp_db_path: str) -> None:
-    """dump_persist removes FTS atomically; delete_subgraph atomically removes nodes.
+    """dump_persist removes FTS atomically; delete_subgraph stays atomic.
 
     Since Fix #9 (Bug #9 in code-review), dump_persist_subgraph drops the FTS
-    row as part of its own transaction (closed → deletable + FTS DELETE).
-    delete_subgraph is therefore no longer responsible for the FTS DELETE and
-    its atomicity concern covers node/edge deletion only.
+    row as part of its own transaction (closed → deletable + FTS DELETE), so
+    in the typical dump-then-delete sequence the FTS row is already gone before
+    delete_subgraph runs. delete_subgraph still issues its own FTS DELETE inside
+    its transaction (for paths that bypass dump_persist), but its atomicity
+    guarantee for THIS test reduces to node/edge deletion because the FTS row
+    is already absent.
 
     This test verifies:
     1. After dump_persist, FTS row is already absent (cleaned up at dump time).

@@ -908,7 +908,8 @@ def find_similar(
     """List subgraphs whose FTS document matches the query."""
     query = _required(arguments, "query")
     scope = arguments.get("scope") or None
-    top_k = int(arguments.get("top_k") or 5)
+    top_k_raw = arguments.get("top_k")
+    top_k = 5 if top_k_raw is None else int(top_k_raw)
     include_open = bool(arguments.get("include_open") or False)
     results = storage.find_similar(
         query=query, scope=scope, top_k=top_k, include_open=include_open

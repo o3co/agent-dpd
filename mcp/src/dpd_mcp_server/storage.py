@@ -1579,7 +1579,7 @@ class Storage:
                 (now, now, now, session_id, *subgraph_ids),
             )
             self._touch_session(conn, session_id=session_id, now=now)
-        self._reindex_subgraph(start_node_id=start_id)
+            self._reindex_subgraph_on(conn, start_node_id=start_id)
 
     def _subgraph_node_ids(
         self, conn: sqlite3.Connection, *, session_id: str, start_id: str,
@@ -1993,10 +1993,11 @@ class Storage:
                 ).fetchone()
                 imported_nodes.append({k: row[k] for k in row.keys()})
 
-        # Reindex any imported start nodes whose state is closed or archived.
-        for n in nodes:
-            if n["type"] == "start":
-                self._reindex_subgraph(start_node_id=n["id"])
+            # Reindex any imported start nodes whose state is closed or archived.
+            # Inside the same transaction so a reindex failure rolls the import back.
+            for n in nodes:
+                if n["type"] == "start":
+                    self._reindex_subgraph_on(conn, start_node_id=n["id"])
 
         return {
             "imported_nodes": imported_nodes,
@@ -2094,8 +2095,9 @@ class Storage:
             )
             self._touch_session(conn, session_id=session_id, now=now)
 
-        # After commit: if the deleted node was a non-start child of a
-        # closed/archived subgraph, rebuild that subgraph's FTS row so the
-        # deleted text no longer matches find_similar.
-        if ancestor_start_id is not None:
-            self._reindex_subgraph(start_node_id=ancestor_start_id)
+            # If the deleted node was a non-start child of a closed/archived
+            # subgraph, rebuild that subgraph's FTS row inside the same
+            # transaction so the FTS row never reflects a node row that no
+            # longer exists.
+            if ancestor_start_id is not None:
+                self._reindex_subgraph_on(conn, start_node_id=ancestor_start_id)
