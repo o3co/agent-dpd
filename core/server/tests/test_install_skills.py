@@ -192,3 +192,70 @@ def test_patch_cursor_mcp_preserves_existing_entries(fake_cursor_home):
     assert "other-server" in data["mcpServers"]
     assert "dpd-mcp-server" in data["mcpServers"]
     assert data["mcpServers"]["other-server"]["command"] == "/other/path"
+
+
+def test_patch_cursor_mcp_rejects_malformed_json(fake_cursor_home):
+    """patch_cursor_mcp exits non-zero on invalid existing mcp.json and leaves it untouched."""
+    mcp_json = fake_cursor_home / "mcp.json"
+    original = "{ this is not valid JSON"
+    mcp_json.write_text(original)
+
+    result = subprocess.run(
+        ["bash", "-c", f"""
+        source {INSTALL_SH}
+        patch_cursor_mcp "{mcp_json}" "/fake/dpd"
+        """],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0, "expected non-zero exit on malformed JSON"
+    # Error message should be actionable (not a raw Python traceback)
+    assert "Traceback" not in result.stderr, (
+        f"raw python traceback leaked to user; stderr={result.stderr!r}"
+    )
+    # Error message should mention the file path so the user knows what to fix
+    assert str(mcp_json) in result.stderr, (
+        f"error message should name the offending file; stderr={result.stderr!r}"
+    )
+    # File is unchanged (no partial / empty write)
+    assert mcp_json.read_text() == original
+
+
+def test_patch_cursor_mcp_uses_dpd_python_when_set(fake_cursor_home):
+    """patch_cursor_mcp uses $DPD_PYTHON when set, falls back to python3 otherwise.
+
+    Verifies the env var threading by setting DPD_PYTHON to a non-existent binary;
+    the function must fail (not silently fall back to python3) so users who customize
+    DPD_PYTHON get the interpreter they asked for.
+    """
+    mcp_json = fake_cursor_home / "mcp.json"
+
+    result = subprocess.run(
+        ["bash", "-c", f"""
+        export DPD_PYTHON=/nonexistent/python-binary-for-test
+        source {INSTALL_SH}
+        patch_cursor_mcp "{mcp_json}" "/fake/dpd"
+        """],
+        capture_output=True, text=True, check=False,
+    )
+    # With a bad DPD_PYTHON, the function should fail (not silently fall through to python3)
+    assert result.returncode != 0, (
+        "expected non-zero exit when DPD_PYTHON points at missing binary; "
+        f"got rc={result.returncode}, stderr={result.stderr!r}"
+    )
+
+
+def test_patch_cursor_mcp_does_not_leave_tmp_file(fake_cursor_home):
+    """patch_cursor_mcp uses atomic write (tmp + rename); no .tmp file remains after success."""
+    mcp_json = fake_cursor_home / "mcp.json"
+
+    result = subprocess.run(
+        ["bash", "-c", f"""
+        source {INSTALL_SH}
+        patch_cursor_mcp "{mcp_json}" "/fake/dpd"
+        """],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    # After successful write, no stale .tmp file should remain in the cursor home
+    tmp_files = list(fake_cursor_home.glob("*.tmp")) + list(fake_cursor_home.glob(".*.tmp"))
+    assert tmp_files == [], f"unexpected tmp file(s) left behind: {tmp_files}"

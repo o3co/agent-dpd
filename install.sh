@@ -66,21 +66,49 @@ link_skills() {
 patch_cursor_mcp() {
   local mcp_json="$1"
   local server_cmd="$2"
+  local py_bin="${DPD_PYTHON:-python3}"
   mkdir -p "$(dirname "$mcp_json")"
-  python3 - "$mcp_json" "$server_cmd" <<'PY'
+  "$py_bin" - "$mcp_json" "$server_cmd" <<'PY'
 import json
 import os
 import sys
+import tempfile
+
 mcp_path, cmd = sys.argv[1], sys.argv[2]
+
 if os.path.exists(mcp_path):
-    with open(mcp_path) as f:
-        data = json.load(f)
+    try:
+        with open(mcp_path) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        sys.stderr.write(
+            f"ERROR: {mcp_path} is not valid JSON ({e.msg} at line {e.lineno} col {e.colno}).\n"
+            f"  Fix it manually (or move it aside) then re-run install.sh.\n"
+        )
+        sys.exit(1)
 else:
     data = {}
+
 data.setdefault("mcpServers", {})
 data["mcpServers"]["dpd-mcp-server"] = {"command": cmd, "args": []}
-with open(mcp_path, "w") as f:
-    json.dump(data, f, indent=2)
+
+# Atomic write: write to a temp file in the same dir, fsync, then os.replace.
+# Same-dir tmp guarantees rename is a metadata-only op (no cross-device move).
+target_dir = os.path.dirname(mcp_path) or "."
+fd, tmp_path = tempfile.mkstemp(prefix=".mcp.json.", suffix=".tmp", dir=target_dir)
+try:
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, mcp_path)
+except Exception:
+    # Clean up tmp on failure so we don't leave junk in user's config dir.
+    try:
+        os.unlink(tmp_path)
+    except OSError:
+        pass
+    raise
 PY
 }
 
