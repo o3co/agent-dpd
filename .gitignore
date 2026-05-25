@@ -15,6 +15,9 @@ build/
 .idea/
 .vscode/
 
+# Local dev agent state (superpowers plans, memory — not for OSS consumers)
+.claude/
+
 # Local sqlite (the live DPD DB lives in ~/.claude/dpd-server/data/, never the repo)
 *.sqlite
 *.sqlite-journal

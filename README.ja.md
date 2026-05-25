@@ -14,32 +14,63 @@ Claude Code スキル + MCP サーバで実現します。
 
 ## インストール
 
-Python 3.11+ と [Claude Code](https://docs.anthropic.com/en/docs/claude-code) が必要です。
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) と **Python 3.11+** (`PATH` 上) が必要です。Python は SessionStart フックが MCP サーバ用の venv を bootstrap するときに使用します。他クライアントは以下を参照。
+
+### Claude Code (推奨)
+
+```text
+/plugin marketplace add o3co/agent-dpd
+/plugin install dpd@agent-dpd
+```
+
+このリポジトリを Claude Code のマーケットプレイスとして登録し、`dpd` プラグインをインストールします。プラグインには以下が含まれます:
+
+- `/dpd`, `/dpd-status`, `/dpd-dump`, `/dpd-edit`, `/dpd-fill`, `/dpd-find-similar`, `/dpd-import`, `/dpd-summary-md`, `/dpd-feedback` スラッシュコマンド
+- MCP サーバ (`dpd-mcp-server`)。初回セッション時に venv を自動構築します
+- プラグイン同梱の Python パッケージと venv を同期させる SessionStart フック
+
+プラグイン本体は `~/.claude/plugins/cache/<marketplace>/dpd/` に、永続 venv は `~/.claude/plugins/data/dpd/.venv/` に配置されます。
+
+更新するには `/plugin update dpd` を実行するか、Claude Code の自動更新に任せます。これでプラグイン同梱ソースが更新され、次セッションの SessionStart フックが pyproject.toml ハッシュ変化を検出して venv を再ビルドします。プラグインの venv 内で直接 `pip install -U dpd-mcp-server` を **実行しないでください**: フックはこの手動更新を検出できず (バンドルソース変化時のみ再ビルド)、venv が同梱ソースと静かに desync します。venv をクリーンにしたい場合は `~/.claude/plugins/data/dpd/.venv/` を削除して Claude Code を再起動すれば、フックが再ビルドします。
+
+### Cursor
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/o3co/agent-dpd/main/install.sh | bash
 ```
 
-このコマンド 1 つで、リポジトリのクローン (デフォルトでは `~/agent-dpd`)、仮想環境の作成、パッケージのインストール、`dpd-mcp-server` の Claude Code への登録、および `/dpd` スキル本体とサブスキル (`/dpd-status`, `/dpd-dump` ほか) の `~/.claude/skills/` への symlink までを行います。実行後は Claude Code を再起動してください — MCP サーバと各スキルが利用可能になります。
+リポジトリのクローン、`core/server/.venv` への venv 作成、`core/skills/*` の `~/.cursor/skills/` への symlink、および `~/.cursor/mcp.json` への `dpd-mcp-server` 登録をまとめて行います。実行後は Cursor を再起動してください。
 
-スクリプトを事前に確認してから実行したい場合:
+Cursor インストーラの環境変数:
+
+| 変数 | デフォルト | 用途 |
+| --- | --- | --- |
+| `DPD_INSTALL_DIR` | `$HOME/agent-dpd` | クローン先ディレクトリ |
+| `DPD_PYTHON` | `python3.11` | 使用する Python インタプリタ |
+| `DPD_CURSOR_HOME` | `$HOME/.cursor` | Cursor 設定ディレクトリ |
+| `DPD_NO_CURSOR_SKILL_LINK` | 未設定 | スキルの symlink をスキップ |
+| `DPD_NO_CURSOR_MCP_PATCH` | 未設定 | `mcp.json` へのパッチをスキップ |
+
+### Cline
+
+Cline は Anthropic 形式のスキルを自動検出します。リポジトリをクローンし、Cline のドキュメントに従って `core/skills/` を参照先として設定してください。MCP は Cline のマーケットプレイス経由で利用できます。
+
+### Codex CLI / Gemini CLI / Claude Desktop / ChatGPT
+
+0.4 では未対応です。ロードマップは [tracking issue #16](https://github.com/o3co/agent-dpd/issues/16) を参照。
+
+### 手動インストール (任意のエージェント)
 
 ```bash
 git clone https://github.com/o3co/agent-dpd.git
 cd agent-dpd
-./install.sh
+python3.11 -m venv core/server/.venv
+core/server/.venv/bin/pip install -e 'core/server[dev]'
+# その後、各クライアントのドキュメントに従って dpd-mcp-server を登録してください。
+# スキル群は core/skills/ 配下にあります。
 ```
 
-### 環境変数による上書き
-
-| 変数名 | デフォルト | 用途 |
-| --- | --- | --- |
-| `DPD_INSTALL_DIR` | `$HOME/agent-dpd` | クローン先ディレクトリ |
-| `DPD_PYTHON` | `python3.11` | 使用する Python インタプリタ |
-| `DPD_NO_REGISTER` | 未設定 | 設定すると Claude Code への MCP 登録をスキップ |
-| `DPD_NO_SKILL_LINK` | 未設定 | 設定するとスキルを `~/.claude/skills/` に symlink するステップをスキップ |
-
-install.sh を使わない手動手順は [AGENTS.md](AGENTS.md#setup) を参照。
+手動セットアップの詳細は [AGENTS.md](AGENTS.md#setup) を参照。
 
 ---
 
@@ -162,8 +193,8 @@ scope=my-workspace
 
 ## その他
 
-- **[mcp/README.ja.md](mcp/README.ja.md)** — MCP サーバのアーキテクチャ + 30 ツールのリファレンス
-- **[skill/README.ja.md](skill/README.ja.md)** — スキル群の概要 (メインの `/dpd` + サブスキル)
+- **[core/server/README.ja.md](core/server/README.ja.md)** — MCP サーバのアーキテクチャ + 30 ツールのリファレンス
+- **[core/skills/README.ja.md](core/skills/README.ja.md)** — スキル群の概要 (メインの `/dpd` + サブスキル)
 - **[AGENTS.md](AGENTS.md)** — コントリビューター向けガイドライン (TDD、レビューフロー、規約)
 
 ---

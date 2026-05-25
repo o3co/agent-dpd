@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# DPD installer — sets up venv, installs the MCP server package, links skills,
-# and registers the MCP server with Claude Code. Idempotent: running twice is safe.
+# DPD install.sh — escape-hatch installer for non-Claude-Code targets.
+#
+# This script is the install path for:
+#   - Cursor (symlinks core/skills/* into ~/.cursor/skills/ + patches ~/.cursor/mcp.json)
+#   - CI smoke tests
+#   - Developers who want a raw editable install without the Claude Code plugin system
+#
+# Claude Code users should install via the plugin system instead:
+#   /plugin marketplace add o3co/agent-dpd
+#   /plugin install dpd@agent-dpd
 #
 # Usage:
 #   ./install.sh                                        (from inside a clone)
@@ -8,15 +16,19 @@
 #                                                        (one-liner; clones if needed)
 #
 # Env vars:
-#   DPD_INSTALL_DIR     where to clone if not already in one (default: $HOME/agent-dpd)
-#   DPD_PYTHON          Python interpreter to use (default: python3.11)
-#   DPD_NO_REGISTER     set to skip `claude mcp add` (default: not set)
-#   DPD_NO_SKILL_LINK   set to skip symlinking skills into ~/.claude/skills/ (default: not set)
+#   DPD_INSTALL_DIR             where to clone if not in one (default: $HOME/agent-dpd)
+#   DPD_PYTHON                  Python interpreter (default: python3.11)
+#   DPD_TARGET                  comma-separated targets (default: cursor; options: cursor, venv-only)
+#   DPD_CURSOR_HOME             cursor config dir (default: $HOME/.cursor)
+#   DPD_NO_CURSOR_SKILL_LINK    skip symlinking into Cursor skills dir
+#   DPD_NO_CURSOR_MCP_PATCH     skip patching ~/.cursor/mcp.json
 
 set -euo pipefail
 
 DPD_INSTALL_DIR="${DPD_INSTALL_DIR:-$HOME/agent-dpd}"
 DPD_PYTHON="${DPD_PYTHON:-python3.11}"
+DPD_TARGET="${DPD_TARGET:-cursor}"
+DPD_CURSOR_HOME="${DPD_CURSOR_HOME:-$HOME/.cursor}"
 REPO_URL="https://github.com/o3co/agent-dpd.git"
 
 say() { printf '%s\n' "==> $*"; }
@@ -38,23 +50,73 @@ link_one_skill() {
 link_skills() {
   local repo_dir="$1"
   local skills_home="$2"
-  [ -f "$repo_dir/skill/SKILL.md" ] \
-    || die "No skill/SKILL.md at $repo_dir/skill — is this a valid DPD checkout?"
+  [ -f "$repo_dir/core/skills/dpd/SKILL.md" ] \
+    || die "No core/skills/dpd/SKILL.md at $repo_dir/core/skills/dpd — is this a valid DPD checkout?"
   mkdir -p "$skills_home"
-  link_one_skill "$repo_dir/skill" "$skills_home/dpd"
   local sub name
-  for sub in "$repo_dir"/skill/*/; do
+  for sub in "$repo_dir"/core/skills/*/; do
     [ -f "$sub/SKILL.md" ] || continue
     name=$(basename "$sub")
     link_one_skill "${sub%/}" "$skills_home/$name"
   done
 }
 
+# --- Cursor mcp.json patching (pure function, exercised by tests) ------------
+
+patch_cursor_mcp() {
+  local mcp_json="$1"
+  local server_cmd="$2"
+  local py_bin="${DPD_PYTHON:-python3}"
+  mkdir -p "$(dirname "$mcp_json")"
+  "$py_bin" - "$mcp_json" "$server_cmd" <<'PY'
+import json
+import os
+import sys
+import tempfile
+
+mcp_path, cmd = sys.argv[1], sys.argv[2]
+
+if os.path.exists(mcp_path):
+    try:
+        with open(mcp_path) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        sys.stderr.write(
+            f"ERROR: {mcp_path} is not valid JSON ({e.msg} at line {e.lineno} col {e.colno}).\n"
+            f"  Fix it manually (or move it aside) then re-run install.sh.\n"
+        )
+        sys.exit(1)
+else:
+    data = {}
+
+data.setdefault("mcpServers", {})
+data["mcpServers"]["dpd-mcp-server"] = {"command": cmd, "args": []}
+
+# Atomic write: write to a temp file in the same dir, fsync, then os.replace.
+# Same-dir tmp guarantees rename is a metadata-only op (no cross-device move).
+target_dir = os.path.dirname(mcp_path) or "."
+fd, tmp_path = tempfile.mkstemp(prefix=".mcp.json.", suffix=".tmp", dir=target_dir)
+try:
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, mcp_path)
+except Exception:
+    # Clean up tmp on failure so we don't leave junk in user's config dir.
+    try:
+        os.unlink(tmp_path)
+    except OSError:
+        pass
+    raise
+PY
+}
+
 # --- main flow ---------------------------------------------------------------
 
 main() {
   # 1. Locate or clone the repo
-  if [ -f "./mcp/pyproject.toml" ] && [ -d "./.git" ]; then
+  if [ -f "./core/server/pyproject.toml" ] && [ -d "./.git" ]; then
     REPO_DIR="$(pwd)"
     say "Installing in place: $REPO_DIR"
   else
@@ -69,48 +131,40 @@ main() {
   fi
 
   # 2. Verify Python
-  if ! command -v "$DPD_PYTHON" >/dev/null 2>&1; then
-    die "$DPD_PYTHON not found. Install Python 3.11+ first (e.g., 'brew install python@3.11')."
-  fi
+  command -v "$DPD_PYTHON" >/dev/null 2>&1 \
+    || die "$DPD_PYTHON not found. Install Python 3.11+ first (e.g., 'brew install python@3.11')."
 
   # 3. Create venv + install package
-  VENV="$REPO_DIR/mcp/.venv"
+  VENV="$REPO_DIR/core/server/.venv"
   say "Setting up venv at $VENV"
   "$DPD_PYTHON" -m venv "$VENV"
   "$VENV/bin/pip" install --quiet --upgrade pip
-  "$VENV/bin/pip" install --quiet -e "$REPO_DIR/mcp[dev]"
+  "$VENV/bin/pip" install --quiet -e "$REPO_DIR/core/server[dev]"
 
-  # 4. Register MCP server with Claude Code
-  if [ -z "${DPD_NO_REGISTER:-}" ]; then
-    if command -v claude >/dev/null 2>&1; then
-      say "Registering dpd-mcp-server with Claude Code"
-      claude mcp remove dpd-mcp-server 2>/dev/null || true
-      claude mcp add dpd-mcp-server -- "$VENV/bin/dpd-mcp-server"
-    else
-      say "Skipping MCP registration: 'claude' CLI not found."
-      say "Register manually later with:"
-      say "  claude mcp add dpd-mcp-server -- $VENV/bin/dpd-mcp-server"
+  # 4. Cursor target
+  if printf '%s\n' "${DPD_TARGET}" | grep -qw cursor; then
+    if [ -z "${DPD_NO_CURSOR_SKILL_LINK:-}" ]; then
+      say "Linking skills into $DPD_CURSOR_HOME/skills/"
+      link_skills "$REPO_DIR" "$DPD_CURSOR_HOME/skills"
     fi
-  else
-    say "Skipping MCP registration (DPD_NO_REGISTER set)."
+    if [ -z "${DPD_NO_CURSOR_MCP_PATCH:-}" ]; then
+      say "Patching $DPD_CURSOR_HOME/mcp.json with dpd-mcp-server"
+      patch_cursor_mcp "$DPD_CURSOR_HOME/mcp.json" "$VENV/bin/dpd-mcp-server"
+    fi
   fi
 
-  # 5. Link skills into ~/.claude/skills/ so /dpd and sub-commands are discoverable
-  if [ -z "${DPD_NO_SKILL_LINK:-}" ]; then
-    say "Linking skills into $HOME/.claude/skills/"
-    link_skills "$REPO_DIR" "$HOME/.claude/skills"
-  else
-    say "Skipping skill linking (DPD_NO_SKILL_LINK set)."
-  fi
-
-  # 6. Done
+  # 5. Done
   cat <<EOF
 
 ✓ DPD installed at $REPO_DIR
 
-Next steps:
-  1. Restart Claude Code so it discovers the new MCP server and skills.
-  2. From any project, type /dpd to start a session.
+Cursor users:
+  Restart Cursor so it picks up the new skills + MCP server.
+
+Claude Code users:
+  install.sh does NOT install for Claude Code. Use the plugin system:
+    /plugin marketplace add o3co/agent-dpd
+    /plugin install dpd@agent-dpd
 
 EOF
 }

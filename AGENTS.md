@@ -6,8 +6,11 @@ Development guidelines for AI coding assistants (Claude, Cursor, Copilot, …) a
 
 **DPD (Decompose-Propagate Decision)** is a graph-based protocol for structuring AI conversations as decision graphs. This repository contains the reference implementation:
 
-- `mcp/` — Model Context Protocol server (Python, stdio, sqlite). Owns graph state and tool API.
-- `skill/` — Claude Code skill. Provides the conversational UX layer that talks to the MCP server.
+- `core/server/` — Model Context Protocol server (Python, stdio, sqlite). Owns graph state and tool API.
+- `core/skills/` — Skill family (`/dpd`, `/dpd-status`, `/dpd-fill`, …). Single source of truth for SKILL.md content.
+- `packaging/<agent>/` — Per-agent packaging wrappers (currently `claude-code/`). Each wraps `core/` with the agent's manifest + symlinks; symlinks are dereferenced at install time.
+- `install.sh` — Escape-hatch installer for Cursor (and CI/dev). Not used for Claude Code (plugin system is the install path there).
+- `marketplace.json` — Registers this repo as a Claude Code marketplace.
 - `docs/` — Specs, migration guides, ADRs.
 
 The MCP server is stateless w.r.t. conversation; the skill is stateless w.r.t. graph data. Both move together.
@@ -16,38 +19,45 @@ The MCP server is stateless w.r.t. conversation; the skill is stateless w.r.t. g
 
 Requires Python 3.11+.
 
-The simplest path is `./install.sh` from the repo root (or `make install`, which wraps it). It creates the venv, installs the package in editable mode with dev deps, registers the server with Claude Code, and symlinks `/dpd` plus sub-skills into `~/.claude/skills/`. Env overrides (`DPD_INSTALL_DIR`, `DPD_PYTHON`, `DPD_NO_REGISTER`, `DPD_NO_SKILL_LINK`) are documented in [install.sh](install.sh).
-
-If you need to know what install.sh actually does (e.g., to debug or customize):
+### For development on this repo
 
 ```bash
-# from repo root
-python3.11 -m venv mcp/.venv
-mcp/.venv/bin/pip install -e 'mcp[dev]'
-
-# register with Claude Code (one-time)
-claude mcp add dpd-mcp-server -- "$(pwd)/mcp/.venv/bin/dpd-mcp-server"
-
-# link skills (so /dpd and sub-commands are discoverable)
-mkdir -p "$HOME/.claude/skills"
-ln -sfn "$(pwd)/skill" "$HOME/.claude/skills/dpd"
-for d in skill/*/; do
-  name=$(basename "$d")
-  [ -f "$d/SKILL.md" ] && ln -sfn "$(pwd)/$d" "$HOME/.claude/skills/$name"
-done
+git clone https://github.com/o3co/agent-dpd.git
+cd agent-dpd
+python3.11 -m venv core/server/.venv
+core/server/.venv/bin/pip install -e 'core/server[dev]'
 ```
 
-Restart Claude Code after registration so the `mcp__dpd-mcp-server__*` tools and `/dpd*` skills become discoverable.
+### To use DPD locally (Claude Code plugin path)
 
-Runtime data lives at `~/.claude/dpd-server/data/<encoded-agent-scope>/graph.sqlite`. Override with `DPD_DATA_DIR` env var (tests use this to avoid touching real data).
-
-## Tests
+For testing the plugin from this source tree (without going through marketplace install):
 
 ```bash
-mcp/.venv/bin/python -m pytest mcp/tests/ -q
+claude --plugin-dir packaging/claude-code
 ```
 
-All tests must pass before commit. The suite includes a stdio end-to-end smoke that spawns the actual server binary — if it fails, debug the failure rather than skipping it.
+Or to install permanently:
+
+```text
+/plugin marketplace add o3co/agent-dpd
+/plugin install dpd@agent-dpd
+```
+
+The plugin lays out `~/.claude/plugins/cache/<marketplace>/dpd/` (read-only on update) and `~/.claude/plugins/data/dpd/.venv/` (persistent, venv lazy-bootstrapped by `packaging/claude-code/hooks/session-start.sh`).
+
+Runtime DPD data lives at `~/.claude/dpd-server/data/<encoded-agent-scope>/graph.sqlite`. Override with `DPD_DATA_DIR` (tests use this).
+
+### Tests
+
+```bash
+core/server/.venv/bin/python -m pytest core/server/tests/ -q
+```
+
+All tests must pass before commit. Includes a stdio end-to-end smoke that spawns the server binary, install.sh helper tests, and the SessionStart hook tests under `packaging/claude-code/hooks/tests/`.
+
+## Cross-platform notes
+
+The `packaging/<agent>/skills/*` entries are symlinks to `core/skills/*` (single source of truth). On Windows, creating symlinks requires either Developer Mode enabled or an elevated shell (`mklink /D`). Mac/Linux work without special permissions. End users of the plugin are NOT affected — Claude Code dereferences symlinks during plugin cache install, so the installed plugin contains real file copies, no live symlinks.
 
 ## Development workflow
 
@@ -97,7 +107,7 @@ A `.dpdrc` is a single-line marker (`scope=<name>` or empty for agent-scope-only
 ## Commits & PRs
 
 - Conventional commit prefixes (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`).
-- Breaking changes get `!` (e.g., `refactor!: rename server/ → mcp/`).
+- Breaking changes get `!` (e.g., `refactor!: rename mcp/ → core/server/`).
 - Commit message body explains the *why*, not the *what*.
 - PRs require conversation resolution before merge (enforced by branch protection).
 - Branch is auto-deleted after merge.

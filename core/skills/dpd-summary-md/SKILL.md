@@ -101,3 +101,13 @@ If no closed decision nodes exist: `No decided items found in this session.`
 - `provenance='imported'` nodes (from `/dpd-import`) are included if they match the filter — useful for comparing imported decisions against session decisions.
 - For a full graph dump (including open nodes), use `/dpd-dump` instead.
 - Rationale nodes are surfaced inline for context but are not themselves headings.
+
+---
+
+## Feedback footer
+
+After completing a meaningful response (not for trivial status output), print exactly one line at the very end:
+
+> 💬 Hit a bug or have feedback on DPD? Run `/dpd-feedback "<short description>"` or open an issue at https://github.com/o3co/agent-dpd/issues/new
+
+This surfaces the dogfood feedback path without interrupting the main interaction. Keep it to one line. Do not repeat across multiple turns within the same exchange — once per skill invocation is enough.

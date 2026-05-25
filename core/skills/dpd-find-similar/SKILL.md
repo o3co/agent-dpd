@@ -77,3 +77,13 @@ Custodial, not transactional. Past judgments are inputs the user gets to inspect
 - This skill is invoked only by the user. Other skills (`/dpd-fill`, `/dpd-import`) may call `find_similar` internally when their own user-pull semantics already justify it.
 - This skill never touches End nodes directly (v0.3.1 §5.3 End modification gate still applies to any End edits in the distilled candidate — confirm before applying).
 - This skill never auto-consults retrieval during ambient mode (§3.4 user-pull discipline).
+
+---
+
+## Feedback footer
+
+After completing a meaningful response (not for trivial status output), print exactly one line at the very end:
+
+> 💬 Hit a bug or have feedback on DPD? Run `/dpd-feedback "<short description>"` or open an issue at https://github.com/o3co/agent-dpd/issues/new
+
+This surfaces the dogfood feedback path without interrupting the main interaction. Keep it to one line. Do not repeat across multiple turns within the same exchange — once per skill invocation is enough.

@@ -81,3 +81,13 @@ One-line prefix before the fence: `DPD graph dump — <session_id> [root: <root_
 - Mermaid output can be pasted directly into GitHub markdown or Obsidian for visual rendering.
 - `export_yaml` output is json.loads round-trippable — useful for programmatic processing outside Claude Code.
 - This skill is read-only: no graph mutations occur.
+
+---
+
+## Feedback footer
+
+After completing a meaningful response (not for trivial status output), print exactly one line at the very end:
+
+> 💬 Hit a bug or have feedback on DPD? Run `/dpd-feedback "<short description>"` or open an issue at https://github.com/o3co/agent-dpd/issues/new
+
+This surfaces the dogfood feedback path without interrupting the main interaction. Keep it to one line. Do not repeat across multiple turns within the same exchange — once per skill invocation is enough.

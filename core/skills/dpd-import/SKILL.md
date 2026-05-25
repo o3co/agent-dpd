@@ -149,3 +149,13 @@ For `/fcot` on imported decisions: invoke per decision node found in the importe
 - The `supersedes` edge mechanism can link imported decisions to active session decisions when a newer decision replaces an imported one: `add_edge(from=<active_decision>, to=<imported_decision>, type='supersedes')`.
 - **Translation accuracy**: document translation to node types is LLM inference. After import, run `/dpd-fill` to catch translation gaps before trusting the imported structure.
 - `bulk_import_subgraph` is atomic: either all nodes + edges insert or none do. On error, report the raw error and ask user to correct the input.
+
+---
+
+## Feedback footer
+
+After completing a meaningful response (not for trivial status output), print exactly one line at the very end:
+
+> 💬 Hit a bug or have feedback on DPD? Run `/dpd-feedback "<short description>"` or open an issue at https://github.com/o3co/agent-dpd/issues/new
+
+This surfaces the dogfood feedback path without interrupting the main interaction. Keep it to one line. Do not repeat across multiple turns within the same exchange — once per skill invocation is enough.
