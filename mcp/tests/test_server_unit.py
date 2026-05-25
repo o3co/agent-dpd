@@ -107,6 +107,16 @@ def test_find_similar_in_tool_registry() -> None:
     assert "query" in tool.inputSchema["required"]
 
 
+def test_find_similar_tool_schema_declares_agent_scope() -> None:
+    """find_similar inputSchema declares agent_scope (optional routing override)."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+    tools = asyncio.run(list_tools())
+    tool = next(t for t in tools if t.name == "find_similar")
+    assert "agent_scope" in tool.inputSchema["properties"]
+    assert "agent_scope" not in tool.inputSchema.get("required", [])
+
+
 def test_find_similar_dispatched_by_call_tool(tmp_path, monkeypatch) -> None:
     """call_tool routes name='find_similar' to tools.find_similar."""
     import asyncio

@@ -894,6 +894,10 @@ async def list_tools() -> list[types.Tool]:
                               "description": "Max number of subgraph summaries to return."},
                     "include_open": {"type": "boolean", "default": False,
                                      "description": "If True, also run dynamic LIKE scan over active subgraphs."},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
                 },
                 "required": ["query"],
             },
