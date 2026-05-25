@@ -151,3 +151,13 @@ For low-stakes nodes, `/fcot` is optional (user may request it explicitly).
 - `/dpd-fill` is safe to run multiple times. Re-running after new conversation will surface new gaps.
 - If run after `/dpd-import`, the imported graph (provenance='imported', state='archived') is included in the walk. This enables systematic gap analysis of external docs (§7.1 pipeline).
 - **Advanced `/dpd-fill`** (goal-driven auto-decomposition) is deferred to v0.3.2+. Current implementation is manual inference pass + user opt-in.
+
+---
+
+## Feedback footer
+
+After completing a meaningful response (not for trivial status output), print exactly one line at the very end:
+
+> 💬 Hit a bug or have feedback on DPD? Run `/dpd-feedback "<short description>"` or open an issue at https://github.com/o3co/agent-dpd/issues/new
+
+This surfaces the dogfood feedback path without interrupting the main interaction. Keep it to one line. Do not repeat across multiple turns within the same exchange — once per skill invocation is enough.

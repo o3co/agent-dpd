@@ -669,3 +669,13 @@ These skills are planned for Phase 4 and will each have their own SKILL.md:
 | `/dpd-find-similar` | **[v0.3.2]** Retrieval-augmented proposal. User-pull only — Claude may NOT auto-invoke. Returns past closed/archived subgraphs matching a query, then distills selected ones into graph-candidate proposals (no prose lessons). |
 
 **`/fcot` orchestration**: `/dpd-fill` and `/dpd-import` SKILL.md prompts should instruct Claude to invoke `/fcot` when verifying inferred or imported nodes. No code-level integration needed — the skill prompt instruction is sufficient.
+
+---
+
+## Feedback footer
+
+After completing a meaningful response (not for trivial status output), print exactly one line at the very end:
+
+> 💬 Hit a bug or have feedback on DPD? Run `/dpd-feedback "<short description>"` or open an issue at https://github.com/o3co/agent-dpd/issues/new
+
+This surfaces the dogfood feedback path without interrupting the main interaction. Keep it to one line. Do not repeat across multiple turns within the same exchange — once per skill invocation is enough.

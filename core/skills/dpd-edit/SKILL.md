@@ -131,3 +131,13 @@ When adding nodes, use one of these types:
 - All operations here are **intentional / user-explicit** — not proposed by ambient mode. No confirmation step is required beyond what the user already stated.
 - After any mutation, update pending updates in-session memory if any related proposals were buffered.
 - **v0.3.1 gaps**: `update_node_text` and `pool_unreject` do not exist. Workarounds documented above. Both are planned for v0.3.2+.
+
+---
+
+## Feedback footer
+
+After completing a meaningful response (not for trivial status output), print exactly one line at the very end:
+
+> 💬 Hit a bug or have feedback on DPD? Run `/dpd-feedback "<short description>"` or open an issue at https://github.com/o3co/agent-dpd/issues/new
+
+This surfaces the dogfood feedback path without interrupting the main interaction. Keep it to one line. Do not repeat across multiple turns within the same exchange — once per skill invocation is enough.

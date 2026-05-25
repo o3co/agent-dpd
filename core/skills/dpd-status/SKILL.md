@@ -105,3 +105,13 @@ Pending updates: <count or "none (ephemeral, not persisted)">
 - **Pending updates are ephemeral**: they live in Claude's in-session memory only. They are lost on Claude Code restart (spec §4.4). Report count if known; otherwise note "ephemeral — count unknown after restart."
 - Rejected Pool items are useful for reject-suppression debugging (§4.6.1). Surface them here so user can decide to unsuppress via `/dpd-edit <pool_id>`.
 - If `scope` is null (top-level session), omit the `scope=` argument from `pool_list` calls.
+
+---
+
+## Feedback footer
+
+After completing a meaningful response (not for trivial status output), print exactly one line at the very end:
+
+> 💬 Hit a bug or have feedback on DPD? Run `/dpd-feedback "<short description>"` or open an issue at https://github.com/o3co/agent-dpd/issues/new
+
+This surfaces the dogfood feedback path without interrupting the main interaction. Keep it to one line. Do not repeat across multiple turns within the same exchange — once per skill invocation is enough.
