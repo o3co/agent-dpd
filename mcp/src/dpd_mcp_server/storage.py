@@ -1115,11 +1115,13 @@ class Storage:
                     -bm25(subgraphs_fts, 3.0, 2.0, 1.0) AS score,
                     snippet(subgraphs_fts, 2, '[', ']', '…', 16) AS snippet
                 FROM subgraphs_fts f
+                JOIN sessions s ON f.session_id = s.id
                 WHERE subgraphs_fts MATCH ?
+                  AND (? IS NULL OR s.scope = ?)
                 ORDER BY bm25(subgraphs_fts, 3.0, 2.0, 1.0)
                 LIMIT ?
                 """,
-                (match_expr, top_k * 4),
+                (match_expr, scope, scope, top_k),
             ).fetchall()
 
             for r in fts_rows:
@@ -1141,8 +1143,8 @@ class Storage:
                 ).fetchone()
                 if root_row is None:
                     continue
-                if scope is not None and (root_row["scope"] or None) != scope:
-                    continue
+                # Scope filter is applied in SQL (JOIN sessions + AND predicate).
+                # No redundant Python-side check needed.
                 end_row = conn.execute(
                     "SELECT text, achievement_conditions FROM nodes "
                     "WHERE paired_for = ? AND type = 'end' "
@@ -1607,6 +1609,10 @@ class Storage:
 
         `destination` is recorded but the actual file write is the caller's concern;
         storage layer only flips state.
+
+        Drops the subgraphs_fts row atomically with the state transition so
+        find_similar (which only returns state IN ('closed', 'archived')) does
+        not surface deletable subgraphs.
         """
         with self.connect() as conn:
             members = self._subgraph_node_ids(
@@ -1623,6 +1629,10 @@ class Storage:
                   AND state = 'closed'
                 """,
                 (now, now, session_id, *members),
+            )
+            conn.execute(
+                "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
+                (start_node_id,),
             )
             self._touch_session(conn, session_id=session_id, now=now)
 

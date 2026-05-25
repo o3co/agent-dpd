@@ -266,3 +266,117 @@ def test_find_similar_include_open_blob_includes_descendants(tmp_db_path: str) -
     # With include_open: subgraph found because decision child text is now in blob
     with_open = storage.find_similar(query="deepchild-keyword", include_open=True)
     assert {r["start_node_id"] for r in with_open} == {"s_o"}
+
+
+def test_find_similar_scope_filter_pushed_into_sql(tmp_db_path: str) -> None:
+    """Bug #8: scope filter must apply BEFORE LIMIT, not after.
+
+    Seed many out-of-scope matches that rank higher than the single in-scope
+    match (noise docs repeat the keyword many times, inflating BM25 score).
+    With the old Python-side filter (LIMIT top_k*4 then filter), the in-scope
+    match is truncated before the filter sees it because top_k*4 = 20 < 30
+    noise rows, all of which score higher.
+    """
+    storage = Storage.open(tmp_db_path)
+    now = "2026-05-25T00:00:00Z"
+    # Noise keyword repeated many times so BM25 ranks noise rows higher.
+    noise_text = ("BUCKET-MATCH " * 20).strip()
+    with storage.connect() as conn:
+        # 30 noise sessions in scope "other", each with high-frequency keyword
+        for i in range(30):
+            sid = f"ses_n{i:02d}"
+            rid = f"root_n{i:02d}"
+            nid = f"node_n{i:02d}"
+            conn.execute(
+                "INSERT INTO sessions (id, scope, started_at, updated_at) "
+                "VALUES (?, 'other', ?, ?)", (sid, now, now),
+            )
+            conn.execute(
+                "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+                "VALUES (?, ?, 'r', 'active', ?)", (rid, sid, now),
+            )
+            conn.execute(
+                "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+                "parent_kind, state, closed_at, created_at, updated_at) "
+                "VALUES (?, ?, 'start', ?, 'closed', ?, 'root', 'closed', ?, ?, ?)",
+                (nid, sid, noise_text, rid, now, now, now),
+            )
+        # One in-scope target — keyword appears only once (lower BM25)
+        conn.execute(
+            "INSERT INTO sessions (id, scope, started_at, updated_at) "
+            "VALUES ('ses_tgt', 'target', ?, ?)", (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('root_tgt', 'ses_tgt', 'r', 'active', ?)", (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, closed_at, created_at, updated_at) "
+            "VALUES ('node_tgt', 'ses_tgt', 'start', 'BUCKET-MATCH target unique', "
+            "'closed', 'root_tgt', 'root', 'closed', ?, ?, ?)", (now, now, now),
+        )
+    # Reindex all 31 subgraphs (noise first so target is inserted last into FTS)
+    for i in range(30):
+        storage._reindex_subgraph(start_node_id=f"node_n{i:02d}")
+    storage._reindex_subgraph(start_node_id="node_tgt")
+
+    # Without scope: top 5 should all be noise (higher BM25 due to repetition)
+    all_results = storage.find_similar(query="bucket-match", top_k=5)
+    assert len(all_results) == 5
+    assert all(r["scope"] == "other" for r in all_results), (
+        "Without scope filter, all top-5 should be noise rows with higher BM25"
+    )
+
+    # With scope='target': must find the single in-scope match even though
+    # 30 noise rows score higher and fill the old top_k*4=20 fetch budget.
+    # Old impl (LIMIT 20 then Python filter) would return 0 results;
+    # correct impl (JOIN + SQL filter then LIMIT) returns exactly 1.
+    target_results = storage.find_similar(
+        query="bucket-match", scope="target", top_k=5
+    )
+    assert len(target_results) == 1, (
+        f"Expected 1 in-scope result, got {len(target_results)} — "
+        "scope filter must apply before LIMIT"
+    )
+    assert target_results[0]["start_node_id"] == "node_tgt"
+    assert target_results[0]["scope"] == "target"
+
+
+def test_find_similar_excludes_deletable_state(tmp_db_path: str) -> None:
+    """Bug #9: subgraphs transitioned to 'deletable' via dump_persist_subgraph
+    must NOT appear in find_similar results. Tool contract: state IN ('closed', 'archived').
+    """
+    storage = Storage.open(tmp_db_path)
+    now = "2026-05-25T00:00:00Z"
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) "
+            "VALUES ('ses_d', ?, ?)", (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('root_d', 'ses_d', 'r', 'active', ?)", (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, closed_at, created_at, updated_at) "
+            "VALUES ('s_d', 'ses_d', 'start', 'DUMPABLE-KEYWORD start', 'closed', "
+            "'root_d', 'root', 'closed', ?, ?, ?)", (now, now, now),
+        )
+    storage._reindex_subgraph(start_node_id="s_d")
+
+    # Pre: closed subgraph is searchable
+    pre = storage.find_similar(query="dumpable-keyword")
+    assert {r["start_node_id"] for r in pre} == {"s_d"}
+
+    # Transition: dump_persist (closed → deletable)
+    storage.dump_persist_subgraph(
+        session_id="ses_d", start_node_id="s_d", destination=None, now=now
+    )
+
+    # Post: deletable subgraph must NOT appear
+    post = storage.find_similar(query="dumpable-keyword")
+    assert post == [], (
+        f"Deletable subgraph leaked into find_similar results: {post}"
+    )

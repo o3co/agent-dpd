@@ -428,10 +428,17 @@ def test_force_delete_start_node_is_atomic(tmp_db_path: str) -> None:
 
 
 def test_delete_subgraph_is_atomic(tmp_db_path: str) -> None:
-    """Bug B: delete_subgraph node delete + FTS DELETE must be atomic.
+    """dump_persist removes FTS atomically; delete_subgraph atomically removes nodes.
 
-    If the FTS DELETE fails after the main delete commits, the FTS row
-    dangles. This test simulates the inverse failure.
+    Since Fix #9 (Bug #9 in code-review), dump_persist_subgraph drops the FTS
+    row as part of its own transaction (closed → deletable + FTS DELETE).
+    delete_subgraph is therefore no longer responsible for the FTS DELETE and
+    its atomicity concern covers node/edge deletion only.
+
+    This test verifies:
+    1. After dump_persist, FTS row is already absent (cleaned up at dump time).
+    2. If delete_subgraph's node-delete fails, the node is rolled back (still
+       present), and FTS remains absent (was already gone).
     """
     storage = Storage.open(tmp_db_path)
     sid, sn, _en = _seed_closed_subgraph(storage)
@@ -441,16 +448,25 @@ def test_delete_subgraph_is_atomic(tmp_db_path: str) -> None:
         session_id=sid, start_node_id=sn, destination=None, now=now2
     )
 
+    # FTS row must be gone immediately after dump_persist (Fix #9).
+    with storage.connect() as conn:
+        fts_after_dump = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?", (sn,),
+        ).fetchone()[0]
+    assert fts_after_dump == 0, (
+        "FTS row must be removed by dump_persist_subgraph (Fix #9)"
+    )
+
+    # Simulate a failure during delete_subgraph's node-delete phase.
     real_connect = storage.connect
-    storage.connect = _make_failing_connect(real_connect, "DELETE FROM subgraphs_fts")  # type: ignore[method-assign]
+    storage.connect = _make_failing_connect(real_connect, "DELETE FROM nodes")  # type: ignore[method-assign]
 
     with pytest.raises(sqlite3.OperationalError):
         storage.delete_subgraph(session_id=sid, start_node_id=sn, now=now2)
 
     storage.connect = real_connect  # type: ignore[method-assign]
 
-    # After failure: BOTH the node AND the FTS row must still exist
-    # (atomic: either both gone, or both present).
+    # After failure: node must still exist (rolled back); FTS stays absent.
     with storage.connect() as conn:
         node_count = conn.execute(
             "SELECT count(*) FROM nodes WHERE id = ?", (sn,),
@@ -458,7 +474,9 @@ def test_delete_subgraph_is_atomic(tmp_db_path: str) -> None:
         fts_count = conn.execute(
             "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?", (sn,),
         ).fetchone()[0]
-    assert node_count == 1 and fts_count == 1, (
-        f"Atomicity violated: node={node_count}, fts={fts_count} "
-        "(expected both 1, both 0, but not split)"
+    assert node_count == 1, (
+        f"Node was not rolled back after delete_subgraph failure: node={node_count}"
+    )
+    assert fts_count == 0, (
+        f"FTS row appeared unexpectedly after delete_subgraph failure: fts={fts_count}"
     )
