@@ -7,7 +7,7 @@ Development guidelines for AI coding assistants (Claude, Cursor, Copilot, …) a
 **DPD (Decompose-Propagate Decision)** is a graph-based protocol for structuring AI conversations as decision graphs. This repository contains the reference implementation:
 
 - `core/server/` — Model Context Protocol server (Python, stdio, sqlite). Owns graph state and tool API.
-- `skill/` — Claude Code skill. Provides the conversational UX layer that talks to the MCP server.
+- `core/skills/` — Claude Code skills. Provides the conversational UX layer that talks to the MCP server.
 - `docs/` — Specs, migration guides, ADRs.
 
 The MCP server is stateless w.r.t. conversation; the skill is stateless w.r.t. graph data. Both move together.
@@ -30,8 +30,7 @@ claude mcp add dpd-mcp-server -- "$(pwd)/core/server/.venv/bin/dpd-mcp-server"
 
 # link skills (so /dpd and sub-commands are discoverable)
 mkdir -p "$HOME/.claude/skills"
-ln -sfn "$(pwd)/skill" "$HOME/.claude/skills/dpd"
-for d in skill/*/; do
+for d in core/skills/*/; do
   name=$(basename "$d")
   [ -f "$d/SKILL.md" ] && ln -sfn "$(pwd)/$d" "$HOME/.claude/skills/$name"
 done

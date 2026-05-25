@@ -38,11 +38,11 @@ link_one_skill() {
 link_skills() {
   local repo_dir="$1"
   local skills_home="$2"
-  [ -f "$repo_dir/skill/dpd/SKILL.md" ] \
-    || die "No skill/dpd/SKILL.md at $repo_dir/skill/dpd — is this a valid DPD checkout?"
+  [ -f "$repo_dir/core/skills/dpd/SKILL.md" ] \
+    || die "No core/skills/dpd/SKILL.md at $repo_dir/core/skills/dpd — is this a valid DPD checkout?"
   mkdir -p "$skills_home"
   local sub name
-  for sub in "$repo_dir"/skill/*/; do
+  for sub in "$repo_dir"/core/skills/*/; do
     [ -f "$sub/SKILL.md" ] || continue
     name=$(basename "$sub")
     link_one_skill "${sub%/}" "$skills_home/$name"

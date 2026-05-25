@@ -163,7 +163,7 @@ scope=my-workspace
 ## その他
 
 - **[core/server/README.ja.md](core/server/README.ja.md)** — MCP サーバのアーキテクチャ + 30 ツールのリファレンス
-- **[skill/README.ja.md](skill/README.ja.md)** — スキル群の概要 (メインの `/dpd` + サブスキル)
+- **[core/skills/README.ja.md](core/skills/README.ja.md)** — スキル群の概要 (メインの `/dpd` + サブスキル)
 - **[AGENTS.md](AGENTS.md)** — コントリビューター向けガイドライン (TDD、レビューフロー、規約)
 
 ---
