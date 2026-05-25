@@ -14,7 +14,7 @@ Claude Code スキル + MCP サーバで実現します。
 
 ## インストール
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) が必要です (他クライアントは以下を参照)。
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) と **Python 3.11+** (`PATH` 上) が必要です。Python は SessionStart フックが MCP サーバ用の venv を bootstrap するときに使用します。他クライアントは以下を参照。
 
 ### Claude Code (推奨)
 
@@ -31,7 +31,7 @@ Claude Code スキル + MCP サーバで実現します。
 
 プラグイン本体は `~/.claude/plugins/cache/<marketplace>/dpd/` に、永続 venv は `~/.claude/plugins/data/dpd/.venv/` に配置されます。
 
-更新するには `/plugin update dpd` を実行するか、Claude Code の自動更新に任せます。`dpd-mcp-server` パッケージ単体の更新は `~/.claude/plugins/data/dpd/.venv/bin/pip install -U dpd-mcp-server` で行えます。
+更新するには `/plugin update dpd` を実行するか、Claude Code の自動更新に任せます。これでプラグイン同梱ソースが更新され、次セッションの SessionStart フックが pyproject.toml ハッシュ変化を検出して venv を再ビルドします。プラグインの venv 内で直接 `pip install -U dpd-mcp-server` を **実行しないでください**: フックはこの手動更新を検出できず (バンドルソース変化時のみ再ビルド)、venv が同梱ソースと静かに desync します。venv をクリーンにしたい場合は `~/.claude/plugins/data/dpd/.venv/` を削除して Claude Code を再起動すれば、フックが再ビルドします。
 
 ### Cursor
 

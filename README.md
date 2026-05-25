@@ -14,7 +14,7 @@ Implementation: a Claude Code skill + MCP server.
 
 ## Install
 
-Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (other clients listed below).
+Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and **Python 3.11+** on `PATH` (used by the SessionStart hook to bootstrap the bundled MCP server's venv). Other clients listed below.
 
 ### Claude Code (recommended)
 
@@ -31,7 +31,7 @@ That registers this repo as a Claude Code marketplace and installs the `dpd` plu
 
 Plugin body lives at `~/.claude/plugins/cache/<marketplace>/dpd/`; persistent venv at `~/.claude/plugins/data/dpd/.venv/`.
 
-To update: `/plugin update dpd` (or rely on Claude Code's auto-update). The `dpd-mcp-server` Python package can be updated standalone via `~/.claude/plugins/data/dpd/.venv/bin/pip install -U dpd-mcp-server`.
+To update: `/plugin update dpd` (or rely on Claude Code's auto-update) — this updates the plugin's bundled source, and the SessionStart hook will rebuild the venv on the next session via its pyproject.toml-hash check. Do **not** `pip install -U dpd-mcp-server` inside the plugin's venv directly: the hook will not notice the manual upgrade (it only rebuilds on bundled-source changes), and the venv will silently desync from the plugin source. If you need a clean venv, delete `~/.claude/plugins/data/dpd/.venv/` and restart Claude Code — the hook will rebuild it.
 
 ### Cursor
 
