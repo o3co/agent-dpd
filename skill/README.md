@@ -46,14 +46,7 @@ The `dpd-import → dpd-fill → /fcot` pipeline is the **self-validation** flow
 
 ## Installation
 
-The skill family is deployed to `~/.claude/skills/dpd/` (and per-sub-skill subdirectories) for Claude Code to discover. Manual sync from this directory:
-
-```bash
-mkdir -p ~/.claude/skills/dpd
-cp -r SKILL.md README.md dpd-* ~/.claude/skills/dpd/
-```
-
-install.sh does not currently sync skill files; a `--with-skill` flag is planned (TODO). For now the manual `cp` above is the documented path.
+The skill family is deployed to `~/.claude/skills/dpd/` (and per-sub-skill subdirectories like `~/.claude/skills/dpd-status/`) for Claude Code to discover. The repo-root `install.sh` does this automatically by symlinking — see the [top-level README](../README.md#install) for the one-liner, or [AGENTS.md](../AGENTS.md#setup) for the manual symlink commands. Set `DPD_NO_SKILL_LINK=1` if you want install.sh to skip this step.
 
 After install, restart Claude Code; the `/dpd`, `/dpd-status`, `/dpd-dump`, etc. invocations should become available.
 
