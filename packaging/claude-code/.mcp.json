@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dpd-mcp-server": {
+      "command": "${CLAUDE_PLUGIN_DATA}/.venv/bin/dpd-mcp-server",
+      "args": []
+    }
+  }
+}
