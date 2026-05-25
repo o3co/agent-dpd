@@ -316,3 +316,149 @@ def test_force_delete_non_start_node_keeps_fts_row(tmp_db_path: str) -> None:
             (sn,),
         ).fetchone()[0]
     assert after == 1
+
+
+def test_force_delete_non_start_child_reindexes_parent_subgraph(tmp_db_path: str) -> None:
+    """Deleting a non-start child of a closed subgraph must rebuild the FTS row
+    so deleted text no longer matches find_similar.
+
+    Codex P2 #2: previously the FTS row was kept but stale.
+    """
+    storage = Storage.open(tmp_db_path)
+    sid, sn, en = _seed_closed_subgraph(storage)
+    now2 = "2026-05-24T00:00:00Z"
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, closed_at, created_at, updated_at) "
+            "VALUES ('child_d', ?, 'decision', 'UNIQUE-MARKER-XYZ to be deleted', "
+            "'closed', ?, 'node', 'closed', ?, ?, ?)",
+            (sid, en, now2, now2, now2),
+        )
+    storage._reindex_subgraph(start_node_id=sn)
+
+    # Pre: the unique marker is in the FTS body_text (decision = body type)
+    with storage.connect() as conn:
+        body_before = conn.execute(
+            "SELECT body_text FROM subgraphs_fts WHERE start_node_id = ?", (sn,),
+        ).fetchone()[0]
+    assert "UNIQUE-MARKER-XYZ" in body_before
+
+    # Force delete the child node
+    storage.force_delete_node(session_id=sid, node_id="child_d", now=now2)
+
+    # Post: FTS row still exists for the start (subgraph identity preserved)
+    # BUT the deleted child's text is no longer in body_text (reindexed)
+    with storage.connect() as conn:
+        row = conn.execute(
+            "SELECT body_text FROM subgraphs_fts WHERE start_node_id = ?", (sn,),
+        ).fetchone()
+    assert row is not None  # FTS row still present
+    assert "UNIQUE-MARKER-XYZ" not in row[0]  # stale text gone
+
+
+def _make_failing_connect(real_connect, fail_on_sql: str):
+    """Return a patched connect() context manager that raises OperationalError
+    when the first SQL statement matching *fail_on_sql* is executed.
+
+    The wrapper delegates all other operations to the real connection.
+    Raising inside the ``with real_connect() as conn:`` block causes SQLite
+    to roll back the transaction — verifying atomicity.
+    """
+    import contextlib
+
+    _inject_once = {"active": True}
+
+    class _FailingConn:
+        def __init__(self, real_conn):
+            self._conn = real_conn
+            self._armed = True
+
+        def execute(self, sql, params=()):
+            if self._armed and fail_on_sql in sql:
+                self._armed = False
+                raise sqlite3.OperationalError(f"simulated failure on: {fail_on_sql!r}")
+            return self._conn.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    @contextlib.contextmanager
+    def patched():
+        with real_connect() as conn:
+            if _inject_once["active"]:
+                _inject_once["active"] = False
+                yield _FailingConn(conn)
+            else:
+                yield conn
+
+    return patched
+
+
+def test_force_delete_start_node_is_atomic(tmp_db_path: str) -> None:
+    """Bug B: FTS DELETE and node DELETE must be one atomic transaction.
+
+    Simulate a failure during the node-delete phase; assert the FTS row
+    is NOT pre-removed. (Today's bug: pre-removes FTS before node delete.)
+    """
+    storage = Storage.open(tmp_db_path)
+    sid, sn, _en = _seed_closed_subgraph(storage)
+    storage._reindex_subgraph(start_node_id=sn)
+
+    with storage.connect() as conn:
+        before = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?", (sn,),
+        ).fetchone()[0]
+    assert before == 1
+
+    real_connect = storage.connect
+    storage.connect = _make_failing_connect(real_connect, "DELETE FROM nodes")  # type: ignore[method-assign]
+
+    with pytest.raises(sqlite3.OperationalError):
+        storage.force_delete_node(session_id=sid, node_id=sn, now="2026-05-24T01:00:00Z")
+
+    storage.connect = real_connect  # type: ignore[method-assign]
+
+    # After failure: FTS row MUST still exist (atomic invariant)
+    with storage.connect() as conn:
+        after = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?", (sn,),
+        ).fetchone()[0]
+    assert after == 1, "FTS row was deleted despite node-delete failure (non-atomic)"
+
+
+def test_delete_subgraph_is_atomic(tmp_db_path: str) -> None:
+    """Bug B: delete_subgraph node delete + FTS DELETE must be atomic.
+
+    If the FTS DELETE fails after the main delete commits, the FTS row
+    dangles. This test simulates the inverse failure.
+    """
+    storage = Storage.open(tmp_db_path)
+    sid, sn, _en = _seed_closed_subgraph(storage)
+    storage._reindex_subgraph(start_node_id=sn)
+    now2 = "2026-05-24T01:00:00Z"
+    storage.dump_persist_subgraph(
+        session_id=sid, start_node_id=sn, destination=None, now=now2
+    )
+
+    real_connect = storage.connect
+    storage.connect = _make_failing_connect(real_connect, "DELETE FROM subgraphs_fts")  # type: ignore[method-assign]
+
+    with pytest.raises(sqlite3.OperationalError):
+        storage.delete_subgraph(session_id=sid, start_node_id=sn, now=now2)
+
+    storage.connect = real_connect  # type: ignore[method-assign]
+
+    # After failure: BOTH the node AND the FTS row must still exist
+    # (atomic: either both gone, or both present).
+    with storage.connect() as conn:
+        node_count = conn.execute(
+            "SELECT count(*) FROM nodes WHERE id = ?", (sn,),
+        ).fetchone()[0]
+        fts_count = conn.execute(
+            "SELECT count(*) FROM subgraphs_fts WHERE start_node_id = ?", (sn,),
+        ).fetchone()[0]
+    assert node_count == 1 and fts_count == 1, (
+        f"Atomicity violated: node={node_count}, fts={fts_count} "
+        "(expected both 1, both 0, but not split)"
+    )

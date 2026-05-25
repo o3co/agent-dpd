@@ -1662,12 +1662,11 @@ class Storage:
                 f"DELETE FROM nodes WHERE session_id = ? AND id IN ({placeholders})",
                 (session_id, *members),
             )
-            self._touch_session(conn, session_id=session_id, now=now)
-        with self.connect() as conn:
             conn.execute(
                 "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
                 (start_node_id,),
             )
+            self._touch_session(conn, session_id=session_id, now=now)
 
     # ------------------------------------------------------------------
     # v0.3.1 Task 6: session mode lifecycle
@@ -1994,26 +1993,51 @@ class Storage:
 
         For safe subgraph deletion, prefer ``delete_subgraph`` (requires state=deletable).
 
-        Steps:
+        Steps (all within one transaction):
         1. NULLs paired_for on any End node paired to this node (if target is a Start).
         2. Tombstones pool_items elevated into this node (NULL + dropped_at + tag)
            to prevent silent reactivation of the pool item.
         3. Deletes referencing edges, then the node itself.
-        4. If the target is a start node, drops its FTS row (subgraph identity gone).
-        """
-        with self.connect() as conn:
-            is_start = conn.execute(
-                "SELECT 1 FROM nodes WHERE session_id = ? AND id = ? "
-                "AND type = 'start'",
-                (session_id, node_id),
-            ).fetchone() is not None
-            if is_start:
-                conn.execute(
-                    "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
-                    (node_id,),
-                )
+        4. If the target IS a start node, drops its FTS row atomically with the
+           node delete (subgraph identity gone).
 
+        After commit (separate connection):
+        5. If the target was a non-start node whose containing subgraph is
+           closed/archived, rebuilds that subgraph's FTS row so the deleted
+           node's text no longer matches find_similar (= staleness prevention).
+        """
+        ancestor_start_id: str | None = None
         with self.connect() as conn:
+            node_info = conn.execute(
+                "SELECT type, parent_id, parent_kind FROM nodes "
+                "WHERE session_id = ? AND id = ?",
+                (session_id, node_id),
+            ).fetchone()
+            if node_info is None:
+                # Nothing to delete; preserve original behavior (silent no-op).
+                return
+
+            is_start = node_info["type"] == "start"
+            if not is_start:
+                # Walk up parent_id chain (kind='node') to find the start node.
+                current_id = node_info["parent_id"]
+                current_kind = node_info["parent_kind"]
+                visited: set[str] = set()
+                while current_kind == "node" and current_id not in visited:
+                    visited.add(current_id)
+                    parent = conn.execute(
+                        "SELECT id, type, parent_id, parent_kind FROM nodes "
+                        "WHERE session_id = ? AND id = ?",
+                        (session_id, current_id),
+                    ).fetchone()
+                    if parent is None:
+                        break
+                    if parent["type"] == "start":
+                        ancestor_start_id = parent["id"]
+                        break
+                    current_id = parent["parent_id"]
+                    current_kind = parent["parent_kind"]
+
             # Null paired_for references TO this node (e.g. its paired End node)
             conn.execute(
                 "UPDATE nodes SET paired_for = NULL "
@@ -2032,8 +2056,20 @@ class Storage:
                 "AND (from_node = ? OR to_node = ?)",
                 (session_id, node_id, node_id),
             )
+            if is_start:
+                # Drop the subgraph's FTS row atomically with the node delete.
+                conn.execute(
+                    "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
+                    (node_id,),
+                )
             conn.execute(
                 "DELETE FROM nodes WHERE session_id = ? AND id = ?",
                 (session_id, node_id),
             )
             self._touch_session(conn, session_id=session_id, now=now)
+
+        # After commit: if the deleted node was a non-start child of a
+        # closed/archived subgraph, rebuild that subgraph's FTS row so the
+        # deleted text no longer matches find_similar.
+        if ancestor_start_id is not None:
+            self._reindex_subgraph(start_node_id=ancestor_start_id)
