@@ -47,4 +47,12 @@ HASH3=$(cat "$CLAUDE_PLUGIN_DATA/.venv/.requirements-hash")
 [ "$HASH3" != "$HASH2" ] || { echo "FAIL: hash unchanged after pyproject.toml edit"; exit 1; }
 echo "OK: pyproject.toml change triggers reinstall"
 
+# Test 4: actual packaging/claude-code/ layout resolves core/server/pyproject.toml
+# (regression guard for the marketplace install layout — symlink dereference at install
+# time means CLAUDE_PLUGIN_ROOT/core/server must resolve from the plugin source dir.)
+ACTUAL_ROOT="$(cd "$HOOK_DIR/.." && pwd)"
+test -f "$ACTUAL_ROOT/core/server/pyproject.toml" \
+  || { echo "FAIL: real packaging/claude-code/core/server/pyproject.toml does not resolve from \$CLAUDE_PLUGIN_ROOT"; exit 1; }
+echo "OK: packaging/claude-code/core/server/pyproject.toml resolves (marketplace install bootstrap path)"
+
 echo "All session-start.sh tests passed."
