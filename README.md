@@ -14,32 +14,63 @@ Implementation: a Claude Code skill + MCP server.
 
 ## Install
 
-Requires Python 3.11+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (other clients listed below).
+
+### Claude Code (recommended)
+
+```text
+/plugin marketplace add o3co/agent-dpd
+/plugin install dpd@agent-dpd
+```
+
+That registers this repo as a Claude Code marketplace and installs the `dpd` plugin. The plugin bundles:
+
+- `/dpd`, `/dpd-status`, `/dpd-dump`, `/dpd-edit`, `/dpd-fill`, `/dpd-find-similar`, `/dpd-import`, `/dpd-summary-md`, `/dpd-feedback` slash commands
+- The MCP server (`dpd-mcp-server`), with venv lazy-bootstrapped on first session
+- A SessionStart hook that keeps the venv in sync with the plugin's bundled Python package
+
+Plugin body lives at `~/.claude/plugins/cache/<marketplace>/dpd/`; persistent venv at `~/.claude/plugins/data/dpd/.venv/`.
+
+To update: `/plugin update dpd` (or rely on Claude Code's auto-update). The `dpd-mcp-server` Python package can be updated standalone via `~/.claude/plugins/data/dpd/.venv/bin/pip install -U dpd-mcp-server`.
+
+### Cursor
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/o3co/agent-dpd/main/install.sh | bash
 ```
 
-That single command clones the repo (to `~/agent-dpd` by default), creates a venv, installs the package, registers `dpd-mcp-server` with Claude Code, and symlinks the `/dpd` skill (plus sub-skills like `/dpd-status`, `/dpd-dump`, …) into `~/.claude/skills/`. Restart Claude Code afterwards so the new MCP server and skills become discoverable.
+That clones the repo, creates a venv at `core/server/.venv`, symlinks `core/skills/*` into `~/.cursor/skills/`, and patches `~/.cursor/mcp.json` to register `dpd-mcp-server`. Restart Cursor.
 
-If you'd rather review the script first:
+Env overrides for the Cursor installer:
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `DPD_INSTALL_DIR` | `$HOME/agent-dpd` | Clone target |
+| `DPD_PYTHON` | `python3.11` | Python interpreter |
+| `DPD_CURSOR_HOME` | `$HOME/.cursor` | Cursor config dir |
+| `DPD_NO_CURSOR_SKILL_LINK` | unset | Skip skill symlinking |
+| `DPD_NO_CURSOR_MCP_PATCH` | unset | Skip `mcp.json` patching |
+
+### Cline
+
+Cline auto-discovers Anthropic-format skills. Clone the repo and point Cline at `core/skills/` per Cline docs. MCP via Cline's MCP marketplace.
+
+### Codex CLI / Gemini CLI / Claude Desktop / ChatGPT
+
+Not in 0.4. See [tracking issue #16](https://github.com/o3co/agent-dpd/issues/16) for roadmap.
+
+### Manual (any agent)
 
 ```bash
 git clone https://github.com/o3co/agent-dpd.git
 cd agent-dpd
-./install.sh
+python3.11 -m venv core/server/.venv
+core/server/.venv/bin/pip install -e 'core/server[dev]'
+# Then register dpd-mcp-server with your client per its docs.
+# Skill family lives under core/skills/.
 ```
 
-### Environment overrides
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `DPD_INSTALL_DIR` | `$HOME/agent-dpd` | Where to clone the repo |
-| `DPD_PYTHON` | `python3.11` | Python interpreter to use |
-| `DPD_NO_REGISTER` | unset | Set to skip Claude Code MCP registration |
-| `DPD_NO_SKILL_LINK` | unset | Set to skip symlinking skills into `~/.claude/skills/` |
-
-Manual steps (no install.sh) are in [AGENTS.md](AGENTS.md#setup).
+Manual setup details are in [AGENTS.md](AGENTS.md#setup).
 
 ---
 
