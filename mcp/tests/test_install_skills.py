@@ -17,10 +17,10 @@ INSTALL_SH = REPO_ROOT / "install.sh"
 
 
 def _make_fixture_repo(tmp_path: Path) -> Path:
-    """Stage a minimal repo with skill/ containing main SKILL.md + 3 sub-skill dirs.
+    """Stage a minimal repo with skill/ containing sub-skill dirs (uniform layout).
 
     Layout:
-      repo/skill/SKILL.md                  -> main /dpd skill
+      repo/skill/dpd/SKILL.md              -> main /dpd skill (now a subdir like any other)
       repo/skill/dpd-foo/SKILL.md          -> sub-skill
       repo/skill/dpd-bar/SKILL.md          -> sub-skill
       repo/skill/dpd-baz/SKILL.md          -> sub-skill
@@ -29,7 +29,9 @@ def _make_fixture_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     skill = repo / "skill"
     skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("# main dpd skill\n")
+    dpd_sub = skill / "dpd"
+    dpd_sub.mkdir()
+    (dpd_sub / "SKILL.md").write_text("# main dpd skill\n")
     for name in ("dpd-foo", "dpd-bar", "dpd-baz"):
         sub = skill / name
         sub.mkdir()
@@ -61,7 +63,7 @@ def test_link_skills_creates_main_and_sub_symlinks(tmp_path: Path) -> None:
 
     main = skills_home / "dpd"
     assert main.is_symlink()
-    assert os.readlink(main) == str(repo / "skill")
+    assert os.readlink(main) == str(repo / "skill" / "dpd")
 
     for name in ("dpd-foo", "dpd-bar", "dpd-baz"):
         link = skills_home / name
@@ -84,7 +86,7 @@ def test_link_skills_replaces_existing_symlink(tmp_path: Path) -> None:
     result = _run_link_skills(repo, skills_home)
 
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
-    assert os.readlink(skills_home / "dpd") == str(repo / "skill")
+    assert os.readlink(skills_home / "dpd") == str(repo / "skill" / "dpd")
 
 
 def test_link_skills_errors_on_existing_directory(tmp_path: Path) -> None:
@@ -105,7 +107,7 @@ def test_link_skills_errors_on_existing_directory(tmp_path: Path) -> None:
 
 
 def test_link_skills_rejects_repo_without_main_skill(tmp_path: Path) -> None:
-    """If skill/SKILL.md is missing, link_skills must refuse rather than create a dangling symlink."""
+    """If skill/dpd/SKILL.md is missing, link_skills must refuse rather than create a dangling symlink."""
     bad_repo = tmp_path / "bad_repo"
     (bad_repo / "skill").mkdir(parents=True)
     skills_home = tmp_path / "skills_home"
