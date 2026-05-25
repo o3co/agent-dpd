@@ -132,3 +132,63 @@ def test_install_sh_main_guarded_when_sourced(tmp_path: Path) -> None:
     assert result.returncode == 0, f"sourcing failed: {result.stderr}"
     assert "sourced" in result.stdout
     assert not sentinel.exists(), "main() must not run on source"
+
+
+# ---------------------------------------------------------------------------
+# Cursor mcp.json patching
+# ---------------------------------------------------------------------------
+
+import json
+import shutil
+
+
+@pytest.fixture
+def fake_cursor_home(tmp_path):
+    """Provide a tmp dir to use as the Cursor home for tests."""
+    cursor_home = tmp_path / ".cursor"
+    cursor_home.mkdir()
+    return cursor_home
+
+
+def test_patch_cursor_mcp_adds_dpd_server(fake_cursor_home):
+    """patch_cursor_mcp adds dpd-mcp-server entry to ~/.cursor/mcp.json."""
+    mcp_json = fake_cursor_home / "mcp.json"
+
+    result = subprocess.run(
+        ["bash", "-c", f"""
+        source {INSTALL_SH}
+        patch_cursor_mcp "{mcp_json}" "/fake/path/to/dpd-mcp-server"
+        """],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert mcp_json.exists()
+
+    data = json.loads(mcp_json.read_text())
+    assert "mcpServers" in data
+    assert "dpd-mcp-server" in data["mcpServers"]
+    assert data["mcpServers"]["dpd-mcp-server"]["command"] == "/fake/path/to/dpd-mcp-server"
+
+
+def test_patch_cursor_mcp_preserves_existing_entries(fake_cursor_home):
+    """patch_cursor_mcp preserves user's other MCP server entries."""
+    mcp_json = fake_cursor_home / "mcp.json"
+    mcp_json.write_text(json.dumps({
+        "mcpServers": {
+            "other-server": {"command": "/other/path", "args": ["-x"]}
+        }
+    }))
+
+    result = subprocess.run(
+        ["bash", "-c", f"""
+        source {INSTALL_SH}
+        patch_cursor_mcp "{mcp_json}" "/fake/dpd"
+        """],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+
+    data = json.loads(mcp_json.read_text())
+    assert "other-server" in data["mcpServers"]
+    assert "dpd-mcp-server" in data["mcpServers"]
+    assert data["mcpServers"]["other-server"]["command"] == "/other/path"
