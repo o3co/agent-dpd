@@ -90,3 +90,52 @@ def test_legacy_alias_forwards_and_warns(caplog) -> None:
             f"expected deprecation warning mentioning get_node, "
             f"got {[r.message for r in caplog.records]}"
         )
+
+
+def test_find_similar_in_tool_registry() -> None:
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+    tools = asyncio.run(list_tools())
+    names = {t.name for t in tools}
+    assert "find_similar" in names
+
+    tool = next(t for t in tools if t.name == "find_similar")
+    assert "query" in tool.inputSchema["properties"]
+    assert "scope" in tool.inputSchema["properties"]
+    assert "top_k" in tool.inputSchema["properties"]
+    assert "include_open" in tool.inputSchema["properties"]
+    assert "query" in tool.inputSchema["required"]
+
+
+def test_find_similar_tool_schema_declares_agent_scope() -> None:
+    """find_similar inputSchema declares agent_scope (optional routing override)."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+    tools = asyncio.run(list_tools())
+    tool = next(t for t in tools if t.name == "find_similar")
+    assert "agent_scope" in tool.inputSchema["properties"]
+    assert "agent_scope" not in tool.inputSchema.get("required", [])
+
+
+def test_find_similar_dispatched_by_call_tool(tmp_path, monkeypatch) -> None:
+    """call_tool routes name='find_similar' to tools.find_similar."""
+    import asyncio
+    from dpd_mcp_server import server as server_mod
+
+    captured: dict = {}
+
+    def fake_find_similar(*, storage, arguments):
+        captured["storage"] = storage
+        captured["arguments"] = arguments
+        return {"results": []}
+
+    monkeypatch.setattr(server_mod.tools, "find_similar", fake_find_similar)
+
+    # Bypass roots resolution by passing explicit agent_scope.
+    monkeypatch.setenv("DPD_DATA_DIR", str(tmp_path))
+    result = asyncio.run(server_mod.call_tool(
+        "find_similar",
+        {"query": "anything", "agent_scope": "test-scope"},
+    ))
+    assert result == {"results": []}
+    assert captured["arguments"] == {"query": "anything"}

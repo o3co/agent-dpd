@@ -25,9 +25,11 @@ class Storage:
 
         Migration chain on pre-existing databases:
           - user_version = 2: run _migrate_v2_to_v3 (structural rebuild),
-            then migrate_v3_to_v4 (ALTER TABLE + partial index).
-          - user_version = 3: run migrate_v3_to_v4 only.
-          - user_version >= 4: no migration needed; schema.sql is applied
+            then migrate_v3_to_v4 (ALTER TABLE + partial index),
+            then migrate_v4_to_v5 (FTS table + backfill).
+          - user_version = 3: run migrate_v3_to_v4 then migrate_v4_to_v5.
+          - user_version = 4: run migrate_v4_to_v5 only.
+          - user_version >= 5: no migration needed; schema.sql is applied
             (CREATE TABLE IF NOT EXISTS is idempotent).
 
         SQLite limitation: ALTER TABLE cannot add CHECK constraints, so the
@@ -36,12 +38,13 @@ class Storage:
         is enforced at runtime by the Task 4 migration script.
         """
         from .migrate_v3_to_v4 import migrate as _migrate_v3_to_v4
+        from .migrate_v4_to_v5 import migrate as _migrate_v4_to_v5
 
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
         # Read user_version BEFORE running schema.sql so we can dispatch to the
-        # correct migration path.  schema.sql unconditionally sets user_version=4,
-        # so reading the version after executescript() would always return 4 and
+        # correct migration path.  schema.sql unconditionally sets user_version=5,
+        # so reading the version after executescript() would always return 5 and
         # make the v3→v4 branch unreachable for genuine v3 databases.
         with sqlite3.connect(db_path) as conn:
             pre_schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -72,8 +75,12 @@ class Storage:
                     )
                 """)
             _migrate_v3_to_v4(db_path=db_path)
+            _migrate_v4_to_v5(db_path=db_path)
         elif pre_schema_version == 3:
             _migrate_v3_to_v4(db_path=db_path)
+            _migrate_v4_to_v5(db_path=db_path)
+        elif pre_schema_version == 4:
+            _migrate_v4_to_v5(db_path=db_path)
 
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
@@ -967,6 +974,279 @@ class Storage:
             return result
 
     # -----------------------------------------------------------------------
+    # v0.3.2: FTS5 reindex helper
+    # -----------------------------------------------------------------------
+
+    _BODY_TYPES = frozenset({
+        "decision", "resolution", "answer", "rationale", "evidence",
+    })
+
+    def _reindex_subgraph(self, *, start_node_id: str) -> None:
+        """Rebuild the subgraphs_fts row for one subgraph (DELETE then INSERT).
+
+        Indexed iff start_node.state IN ('closed', 'archived'). 'active' starts
+        produce only the DELETE (active subgraphs are not in the FTS index).
+
+        Called by mutation hooks (mark_reached, bulk_import_subgraph,
+        delete_subgraph, force_delete_node) and by the v4->v5 backfill.
+
+        Opens its own connection. For callers inside an existing transaction,
+        use ``_reindex_subgraph_on`` directly with the existing conn.
+        """
+        with self.connect() as conn:
+            self._reindex_subgraph_on(conn, start_node_id=start_node_id)
+
+    def _reindex_subgraph_on(
+        self, conn: sqlite3.Connection, *, start_node_id: str
+    ) -> None:
+        """Same logic as _reindex_subgraph but operates on a caller-owned conn.
+
+        Performs DELETE + optional INSERT on the given connection. The caller
+        owns the transaction lifecycle (no commit or rollback is issued here).
+
+        Used by the v4→v5 migration to run the backfill inside a single
+        BEGIN/COMMIT so a backfill failure rolls back the version bump too.
+        """
+        conn.execute(
+            "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
+            (start_node_id,),
+        )
+        start = conn.execute(
+            "SELECT id, session_id, type, text, state, archived_at, "
+            "closed_at FROM nodes WHERE id = ?",
+            (start_node_id,),
+        ).fetchone()
+        if start is None:
+            return
+        if start["type"] != "start":
+            return
+        if start["state"] not in ("closed", "archived"):
+            return
+
+        session_id = start["session_id"]
+        anchor_parts: list[str] = [start["text"] or ""]
+        body_parts: list[str] = []
+        journey_parts: list[str] = []
+
+        members = self._subgraph_node_ids(
+            conn, session_id=session_id, start_id=start_node_id
+        )
+        placeholders = ",".join("?" * len(members))
+        rows = conn.execute(
+            f"SELECT id, type, text, paired_for, achievement_conditions "
+            f"FROM nodes WHERE session_id = ? AND id IN ({placeholders}) "
+            f"ORDER BY created_at, id",
+            (session_id, *members),
+        ).fetchall()
+        for r in rows:
+            if r["id"] == start_node_id:
+                continue
+            text = r["text"] or ""
+            if r["type"] == "end" and r["paired_for"] == start_node_id:
+                anchor_parts.append(text)
+                if r["achievement_conditions"]:
+                    anchor_parts.append(r["achievement_conditions"])
+            elif r["type"] in self._BODY_TYPES:
+                body_parts.append(text)
+            else:
+                journey_parts.append(text)
+
+        closed_at = start["closed_at"] or start["archived_at"]
+        conn.execute(
+            """
+            INSERT INTO subgraphs_fts
+                (start_node_id, session_id, anchor_text, body_text,
+                 journey_text, closed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                start_node_id,
+                session_id,
+                " ".join(p for p in anchor_parts if p),
+                " ".join(p for p in body_parts if p),
+                " ".join(p for p in journey_parts if p),
+                closed_at,
+            ),
+        )
+
+    @staticmethod
+    def _normalize_query(query: str) -> str:
+        """Strip, lowercase, and reject queries shorter than 3 chars.
+
+        Empty return means "skip search" — callers return an empty result list.
+        """
+        if query is None:
+            return ""
+        cleaned = query.strip().lower()
+        if len(cleaned) < 3:
+            return ""
+        return cleaned
+
+    def find_similar(
+        self,
+        *,
+        query: str,
+        scope: str | None = None,
+        top_k: int = 5,
+        include_open: bool = False,
+    ) -> list[dict]:
+        """Retrieve up to top_k subgraphs whose FTS document matches query.
+
+        Default: state IN ('closed', 'archived'). With include_open=True,
+        an additional dynamic LIKE scan covers state='active' subgraphs and
+        results are concatenated (closed/archived first).
+
+        bm25 returns lower-is-better; we return -bm25 so caller sees
+        higher-is-better scores.
+        """
+        normalized = self._normalize_query(query)
+        if not normalized:
+            return []
+
+        match_expr = '"' + normalized.replace('"', '""') + '"'
+        eligible_rows: list[dict] = []
+        with self.connect() as conn:
+            fts_rows = conn.execute(
+                """
+                SELECT
+                    f.start_node_id AS start_node_id,
+                    f.session_id    AS session_id,
+                    f.anchor_text   AS anchor_text,
+                    -bm25(subgraphs_fts, 3.0, 2.0, 1.0) AS score,
+                    snippet(subgraphs_fts, 2, '[', ']', '…', 16) AS snippet
+                FROM subgraphs_fts f
+                JOIN sessions s ON f.session_id = s.id
+                WHERE subgraphs_fts MATCH ?
+                  AND (? IS NULL OR s.scope = ?)
+                ORDER BY bm25(subgraphs_fts, 3.0, 2.0, 1.0)
+                LIMIT ?
+                """,
+                (match_expr, scope, scope, top_k),
+            ).fetchall()
+
+            for r in fts_rows:
+                start_node_id = r["start_node_id"]
+                node = conn.execute(
+                    "SELECT id, state, archived_at, closed_at, text, paired_for "
+                    "FROM nodes WHERE id = ?",
+                    (start_node_id,),
+                ).fetchone()
+                if node is None:
+                    continue
+                root_row = conn.execute(
+                    "SELECT roots.id AS root_id, sessions.scope AS scope "
+                    "FROM nodes "
+                    "JOIN roots ON nodes.parent_id = roots.id "
+                    "JOIN sessions ON nodes.session_id = sessions.id "
+                    "WHERE nodes.id = ? AND nodes.parent_kind = 'root'",
+                    (start_node_id,),
+                ).fetchone()
+                if root_row is None:
+                    continue
+                # Scope filter is applied in SQL (JOIN sessions + AND predicate).
+                # No redundant Python-side check needed.
+                end_row = conn.execute(
+                    "SELECT text, achievement_conditions FROM nodes "
+                    "WHERE paired_for = ? AND type = 'end' "
+                    "ORDER BY created_at LIMIT 1",
+                    (start_node_id,),
+                ).fetchone()
+                eligible_rows.append({
+                    "start_node_id": start_node_id,
+                    "session_id": r["session_id"],
+                    "root_id": root_row["root_id"],
+                    "scope": root_row["scope"] or None,
+                    "start_text": node["text"],
+                    "end_text": end_row["text"] if end_row else None,
+                    "achievement_conditions": (
+                        end_row["achievement_conditions"] if end_row else None
+                    ),
+                    "state": node["state"],
+                    "score": float(r["score"]),
+                    "matched_snippet": r["snippet"],
+                    "closed_at": node["closed_at"] or node["archived_at"],
+                })
+                if len(eligible_rows) >= top_k:
+                    break
+
+        if not include_open:
+            return eligible_rows[:top_k]
+
+        # Open fallback: dynamic LIKE scan over active start nodes.
+        remaining = top_k - len(eligible_rows)
+        if remaining <= 0:
+            return eligible_rows
+        like_expr = "%" + normalized.replace("\\", "\\\\")\
+                                    .replace("%", "\\%")\
+                                    .replace("_", "\\_") + "%"
+        with self.connect() as conn:
+            active_starts = conn.execute(
+                """
+                SELECT n.id AS start_node_id, n.session_id, n.text AS start_text,
+                       roots.id AS root_id, sessions.scope AS scope
+                FROM nodes n
+                JOIN roots ON n.parent_id = roots.id
+                JOIN sessions ON n.session_id = sessions.id
+                WHERE n.type = 'start'
+                  AND n.state = 'active'
+                  AND n.parent_kind = 'root'
+                """
+            ).fetchall()
+            open_results: list[dict] = []
+            for r in active_starts:
+                if scope is not None and (r["scope"] or None) != scope:
+                    continue
+                end_row = conn.execute(
+                    "SELECT text, achievement_conditions FROM nodes "
+                    "WHERE paired_for = ? AND type = 'end' "
+                    "ORDER BY created_at LIMIT 1",
+                    (r["start_node_id"],),
+                ).fetchone()
+                end_text = end_row["text"] if end_row else ""
+                ach = end_row["achievement_conditions"] if end_row else ""
+
+                # Mirror _reindex_subgraph: include all descendant text in the
+                # searchable blob so a match in a decision/rationale child is
+                # discoverable in include_open mode.
+                descendant_ids = self._subgraph_node_ids(
+                    conn, session_id=r["session_id"], start_id=r["start_node_id"]
+                )
+                descendant_texts: list[str] = []
+                if descendant_ids:
+                    placeholders = ",".join("?" * len(descendant_ids))
+                    descendant_rows = conn.execute(
+                        f"SELECT text FROM nodes "
+                        f"WHERE session_id = ? AND id IN ({placeholders})",
+                        (r["session_id"], *descendant_ids),
+                    ).fetchall()
+                    descendant_texts = [
+                        (row["text"] or "").lower() for row in descendant_rows
+                    ]
+
+                blob = " ".join([
+                    (r["start_text"] or "").lower(),
+                    (end_text or "").lower(),
+                    (ach or "").lower(),
+                    *descendant_texts,
+                ])
+                if normalized in blob:
+                    open_results.append({
+                        "start_node_id": r["start_node_id"],
+                        "session_id": r["session_id"],
+                        "root_id": r["root_id"],
+                        "scope": r["scope"] or None,
+                        "start_text": r["start_text"],
+                        "end_text": end_text or None,
+                        "achievement_conditions": ach or None,
+                        "state": "active",
+                        "score": float(blob.count(normalized)),
+                        "matched_snippet": None,
+                        "closed_at": None,
+                    })
+            open_results.sort(key=lambda x: x["score"], reverse=True)
+            return eligible_rows + open_results[:remaining]
+
+    # -----------------------------------------------------------------------
     # v0.3 Task 2: scope_root resolution + pool_items CRUD
     # -----------------------------------------------------------------------
 
@@ -1299,6 +1579,7 @@ class Storage:
                 (now, now, now, session_id, *subgraph_ids),
             )
             self._touch_session(conn, session_id=session_id, now=now)
+            self._reindex_subgraph_on(conn, start_node_id=start_id)
 
     def _subgraph_node_ids(
         self, conn: sqlite3.Connection, *, session_id: str, start_id: str,
@@ -1328,6 +1609,10 @@ class Storage:
 
         `destination` is recorded but the actual file write is the caller's concern;
         storage layer only flips state.
+
+        Drops the subgraphs_fts row atomically with the state transition so
+        find_similar (which only returns state IN ('closed', 'archived')) does
+        not surface deletable subgraphs.
         """
         with self.connect() as conn:
             members = self._subgraph_node_ids(
@@ -1344,6 +1629,10 @@ class Storage:
                   AND state = 'closed'
                 """,
                 (now, now, session_id, *members),
+            )
+            conn.execute(
+                "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
+                (start_node_id,),
             )
             self._touch_session(conn, session_id=session_id, now=now)
 
@@ -1398,6 +1687,10 @@ class Storage:
             conn.execute(
                 f"DELETE FROM nodes WHERE session_id = ? AND id IN ({placeholders})",
                 (session_id, *members),
+            )
+            conn.execute(
+                "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
+                (start_node_id,),
             )
             self._touch_session(conn, session_id=session_id, now=now)
 
@@ -1700,6 +1993,12 @@ class Storage:
                 ).fetchone()
                 imported_nodes.append({k: row[k] for k in row.keys()})
 
+            # Reindex any imported start nodes whose state is closed or archived.
+            # Inside the same transaction so a reindex failure rolls the import back.
+            for n in nodes:
+                if n["type"] == "start":
+                    self._reindex_subgraph_on(conn, start_node_id=n["id"])
+
         return {
             "imported_nodes": imported_nodes,
             "imported_edges": inserted_edges,
@@ -1721,13 +2020,51 @@ class Storage:
 
         For safe subgraph deletion, prefer ``delete_subgraph`` (requires state=deletable).
 
-        Steps:
+        Steps (all within one transaction):
         1. NULLs paired_for on any End node paired to this node (if target is a Start).
         2. Tombstones pool_items elevated into this node (NULL + dropped_at + tag)
            to prevent silent reactivation of the pool item.
         3. Deletes referencing edges, then the node itself.
+        4. If the target IS a start node, drops its FTS row atomically with the
+           node delete (subgraph identity gone).
+
+        After commit (separate connection):
+        5. If the target was a non-start node whose containing subgraph is
+           closed/archived, rebuilds that subgraph's FTS row so the deleted
+           node's text no longer matches find_similar (= staleness prevention).
         """
+        ancestor_start_id: str | None = None
         with self.connect() as conn:
+            node_info = conn.execute(
+                "SELECT type, parent_id, parent_kind FROM nodes "
+                "WHERE session_id = ? AND id = ?",
+                (session_id, node_id),
+            ).fetchone()
+            if node_info is None:
+                # Nothing to delete; preserve original behavior (silent no-op).
+                return
+
+            is_start = node_info["type"] == "start"
+            if not is_start:
+                # Walk up parent_id chain (kind='node') to find the start node.
+                current_id = node_info["parent_id"]
+                current_kind = node_info["parent_kind"]
+                visited: set[str] = set()
+                while current_kind == "node" and current_id not in visited:
+                    visited.add(current_id)
+                    parent = conn.execute(
+                        "SELECT id, type, parent_id, parent_kind FROM nodes "
+                        "WHERE session_id = ? AND id = ?",
+                        (session_id, current_id),
+                    ).fetchone()
+                    if parent is None:
+                        break
+                    if parent["type"] == "start":
+                        ancestor_start_id = parent["id"]
+                        break
+                    current_id = parent["parent_id"]
+                    current_kind = parent["parent_kind"]
+
             # Null paired_for references TO this node (e.g. its paired End node)
             conn.execute(
                 "UPDATE nodes SET paired_for = NULL "
@@ -1746,8 +2083,21 @@ class Storage:
                 "AND (from_node = ? OR to_node = ?)",
                 (session_id, node_id, node_id),
             )
+            if is_start:
+                # Drop the subgraph's FTS row atomically with the node delete.
+                conn.execute(
+                    "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
+                    (node_id,),
+                )
             conn.execute(
                 "DELETE FROM nodes WHERE session_id = ? AND id = ?",
                 (session_id, node_id),
             )
             self._touch_session(conn, session_id=session_id, now=now)
+
+            # If the deleted node was a non-start child of a closed/archived
+            # subgraph, rebuild that subgraph's FTS row inside the same
+            # transaction so the FTS row never reflects a node row that no
+            # longer exists.
+            if ancestor_start_id is not None:
+                self._reindex_subgraph_on(conn, start_node_id=ancestor_start_id)

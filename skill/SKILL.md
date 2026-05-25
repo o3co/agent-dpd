@@ -504,6 +504,7 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `delete(session_id, start_node_id)` | Physical delete of a deletable subgraph. |
 | `force_delete(session_id, node_id)` | Single-node force delete (emergency only). |
 | `bulk_import_subgraph(session_id, root_id, nodes, edges, provenance?, state?)` | **[v0.3.1]** Atomic batch insert of multiple nodes + edges with provenance/state. `provenance` defaults to `'imported'`, `state` defaults to `'archived'`. Used by `/dpd-import`. |
+| `find_similar(query, scope?, top_k?, include_open?)` | **[v0.3.2]** Retrieve closed/archived subgraphs whose FTS5 index matches the query. `scope` narrows to a sub-scope (None = all). `include_open=True` also covers active subgraphs via dynamic LIKE. Returns `{results: [SubgraphSummary, ...]}`. |
 
 **Session mode transition table (§9.1.1):**
 
@@ -606,6 +607,53 @@ The structure is the value. Keep prose minimal.
 
 ---
 
+## v0.3.2 additions
+
+Four methodology additions land in v0.3.2. None change existing tool signatures or state machine. All are additive layers on top of v0.3.1 ambient overlay.
+
+### Phase ordering via `blocks` edge (D1')
+
+For sequential multi-goal work (spec → design → impl → audit), express each phase as its own subgraph (Start_Pn / End_Pn pair) and connect them with the existing `blocks` edge:
+
+```text
+add_edge(from_node=<P1_End>, to_node=<P2_Start>, type="blocks",
+         reason="<why P2 cannot proceed until P1 is reached>")
+```
+
+Convention: edge `from` is the blocker, `to` is the blocked. `list_unblocked_open_nodes(blocker_edge_type='blocks')` surfaces what is currently unblocked. **Enforcement is soft** — `mark_reached` does NOT verify preconditions; phase discipline is a SKILL.md concern, not a server check.
+
+Each phase's deliverables go in the End's `achievement_conditions` text (existing v0.3 §5.3 field). No new vocabulary, no schema change.
+
+### Multi-goal methodology pattern (D2)
+
+Parallel multi-goal (multiple independent goals in the same scope) is already supported by v0.3: spawn multiple roots under the same scope_root, each with its own End. `mark_reached` fires per End independently.
+
+A "meta-Goal G*" pattern — combining all goals into one super-End — is *available*: the user can spawn a new subgraph whose `achievement_conditions` reads "G1 reached ∧ G2 reached ∧ …". **Claude MUST NOT auto-generate G\*.** The user must propose it explicitly; only then does Claude help build it. This protects §1.1 (no prescription to AI thought).
+
+Optional goals and tradeoffs between goals belong in `achievement_conditions` prose. Emergent goals are handled by v0.3 §3.7 End re-classification (no new mechanism needed).
+
+### Retrieval-augmented proposal (D3, H3)
+
+`/dpd-find-similar` (user-pull only — see next subsection) returns past closed/archived subgraphs ranked by FTS5. Claude then **distills** selected past subgraphs into a graph candidate — additions, edges, neighboring modifications — and proposes them via the v0.3.1 §4.5 hierarchical-list format. The user-confirm loop in §4.6 applies as usual.
+
+**Distillation discipline (D3):**
+- ❌ DO NOT write lesson-style prose ("past X did Y, so we should Y").
+- ✅ DO write graph operands: `[→ add]`, `(NEW) decision ← "…"`, `(NEW) rationale ← "…"`.
+- Justifications belong inside the graph (as `rationale` nodes), never in prose.
+
+§6.3 of the v0.3.2 spec spells out an exception: describing *what was retrieved* (factual summary of the result list) is allowed prose. Distilling *lessons* from it is forbidden prose.
+
+### User-pull only discipline (H2)
+
+`find_similar` is a **user-pull** tool. Claude MUST NOT auto-consult it.
+
+- ✅ Allowed firings: `/dpd-find-similar`, user explicit "any similar past judgment?", and within other user-pull skills (`/dpd-fill`, `/dpd-import`) when they need it.
+- ❌ Forbidden firings: ambient-mode signal detection (§4.1), per-turn self-checks (§4.8), End achievement evaluation (§5.1) — none of these may include "consult find_similar" as a step.
+
+Auto-consulting `find_similar` would seed AI reasoning with bias from past judgments, directly violating §1.1.
+
+---
+
 ## Related sub-skills (Phase 4)
 
 These skills are planned for Phase 4 and will each have their own SKILL.md:
@@ -618,5 +666,6 @@ These skills are planned for Phase 4 and will each have their own SKILL.md:
 | `/dpd-dump` | Full graph tree textual dump (wraps `export_yaml` / `export_mermaid`) |
 | `/dpd-summary-md` | Export decided/closed items as markdown summary |
 | `/dpd-edit <node\|pool_id>` | Manual node/pool mutation. Also used for unsuppress: clear `rejected_at` / `rejected_reason` on a pool item. |
+| `/dpd-find-similar` | **[v0.3.2]** Retrieval-augmented proposal. User-pull only — Claude may NOT auto-invoke. Returns past closed/archived subgraphs matching a query, then distills selected ones into graph-candidate proposals (no prose lessons). |
 
 **`/fcot` orchestration**: `/dpd-fill` and `/dpd-import` SKILL.md prompts should instruct Claude to invoke `/fcot` when verifying inferred or imported nodes. No code-level integration needed — the skill prompt instruction is sufficient.

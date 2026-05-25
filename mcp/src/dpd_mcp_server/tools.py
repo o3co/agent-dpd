@@ -900,6 +900,23 @@ def set_session_mode(
     return {"session": updated_session}
 
 
+def find_similar(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """List subgraphs whose FTS document matches the query."""
+    query = _required(arguments, "query")
+    scope = arguments.get("scope") or None
+    top_k_raw = arguments.get("top_k")
+    top_k = 5 if top_k_raw is None else int(top_k_raw)
+    include_open = bool(arguments.get("include_open") or False)
+    results = storage.find_similar(
+        query=query, scope=scope, top_k=top_k, include_open=include_open
+    )
+    return {"results": results}
+
+
 def _required(arguments: dict[str, Any], key: str) -> Any:
     value = arguments.get(key)
     if value is None or value == "":

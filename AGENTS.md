@@ -73,7 +73,7 @@ When the same issue is raised by 2+ independent reviewers, default to must-fix e
 
 The **user-facing readable spec** (concept + lifecycle + Mermaid diagrams) lives in [`README.md`](README.md) (or `docs/spec.md` if split out).
 
-The **full implementation-level spec** (SQL DDL, error codes, state machine tables, migration semantics) currently lives in the upstream workspace at `scopes/decompose-propagate.protocol/docs/dpd-v<N>-draft.md`. If you need it for non-trivial implementation work, ask the maintainers — graduation into this repo is planned but not done.
+The **full implementation-level spec** (SQL DDL, error codes, state machine tables, migration semantics) currently lives in the upstream workspace at `scopes/dev.dpd/docs/dpd-v<N>-draft.md`. If you need it for non-trivial implementation work, ask the maintainers — graduation into this repo is planned but not done.
 
 ADRs and migration guides go in `docs/`.
 
