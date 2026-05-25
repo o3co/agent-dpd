@@ -6,7 +6,7 @@ Development guidelines for AI coding assistants (Claude, Cursor, Copilot, …) a
 
 **DPD (Decompose-Propagate Decision)** is a graph-based protocol for structuring AI conversations as decision graphs. This repository contains the reference implementation:
 
-- `mcp/` — Model Context Protocol server (Python, stdio, sqlite). Owns graph state and tool API.
+- `core/server/` — Model Context Protocol server (Python, stdio, sqlite). Owns graph state and tool API.
 - `skill/` — Claude Code skill. Provides the conversational UX layer that talks to the MCP server.
 - `docs/` — Specs, migration guides, ADRs.
 
@@ -22,11 +22,11 @@ If you need to know what install.sh actually does (e.g., to debug or customize):
 
 ```bash
 # from repo root
-python3.11 -m venv mcp/.venv
-mcp/.venv/bin/pip install -e 'mcp[dev]'
+python3.11 -m venv core/server/.venv
+core/server/.venv/bin/pip install -e 'core/server[dev]'
 
 # register with Claude Code (one-time)
-claude mcp add dpd-mcp-server -- "$(pwd)/mcp/.venv/bin/dpd-mcp-server"
+claude mcp add dpd-mcp-server -- "$(pwd)/core/server/.venv/bin/dpd-mcp-server"
 
 # link skills (so /dpd and sub-commands are discoverable)
 mkdir -p "$HOME/.claude/skills"
@@ -44,7 +44,7 @@ Runtime data lives at `~/.claude/dpd-server/data/<encoded-agent-scope>/graph.sql
 ## Tests
 
 ```bash
-mcp/.venv/bin/python -m pytest mcp/tests/ -q
+core/server/.venv/bin/python -m pytest core/server/tests/ -q
 ```
 
 All tests must pass before commit. The suite includes a stdio end-to-end smoke that spawns the actual server binary — if it fails, debug the failure rather than skipping it.
@@ -97,7 +97,7 @@ A `.dpdrc` is a single-line marker (`scope=<name>` or empty for agent-scope-only
 ## Commits & PRs
 
 - Conventional commit prefixes (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`).
-- Breaking changes get `!` (e.g., `refactor!: rename server/ → mcp/`).
+- Breaking changes get `!` (e.g., `refactor!: rename mcp/ → core/server/`).
 - Commit message body explains the *why*, not the *what*.
 - PRs require conversation resolution before merge (enforced by branch protection).
 - Branch is auto-deleted after merge.

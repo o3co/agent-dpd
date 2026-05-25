@@ -162,7 +162,7 @@ Why represent decisions as a *graph*, what failure modes the End modification ga
 
 ## Other docs
 
-- **[mcp/README.md](mcp/README.md)** — MCP server architecture + 30-tool reference
+- **[core/server/README.md](core/server/README.md)** — MCP server architecture + 30-tool reference
 - **[skill/README.md](skill/README.md)** — Skill family overview (main `/dpd` + sub-skills)
 - **[AGENTS.md](AGENTS.md)** — Contributor guidelines (TDD, review workflow, conventions)
 

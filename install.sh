@@ -53,7 +53,7 @@ link_skills() {
 
 main() {
   # 1. Locate or clone the repo
-  if [ -f "./mcp/pyproject.toml" ] && [ -d "./.git" ]; then
+  if [ -f "./core/server/pyproject.toml" ] && [ -d "./.git" ]; then
     REPO_DIR="$(pwd)"
     say "Installing in place: $REPO_DIR"
   else
@@ -73,11 +73,11 @@ main() {
   fi
 
   # 3. Create venv + install package
-  VENV="$REPO_DIR/mcp/.venv"
+  VENV="$REPO_DIR/core/server/.venv"
   say "Setting up venv at $VENV"
   "$DPD_PYTHON" -m venv "$VENV"
   "$VENV/bin/pip" install --quiet --upgrade pip
-  "$VENV/bin/pip" install --quiet -e "$REPO_DIR/mcp[dev]"
+  "$VENV/bin/pip" install --quiet -e "$REPO_DIR/core/server[dev]"
 
   # 4. Register MCP server with Claude Code
   if [ -z "${DPD_NO_REGISTER:-}" ]; then

@@ -1,5 +1,5 @@
-# Lives under mcp/tests/ rather than a repo-root tests/ because mcp/.venv is the
-# only venv and mcp/pyproject.toml is the only pytest config — keeping it here
+# Lives under core/server/tests/ rather than a repo-root tests/ because core/server/.venv is the
+# only venv and core/server/pyproject.toml is the only pytest config — keeping it here
 # means `make test` covers both the MCP server and the installer in one pass.
 
 """Tests for install.sh's skill-linking logic."""
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 INSTALL_SH = REPO_ROOT / "install.sh"
 
 

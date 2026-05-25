@@ -3,7 +3,7 @@
 # entry point for users who prefer `make`.
 
 PYTHON ?= python3.11
-VENV   ?= mcp/.venv
+VENV   ?= core/server/.venv
 PY      = $(VENV)/bin/python
 
 .PHONY: help install test clean
@@ -21,8 +21,8 @@ install:
 	./install.sh
 
 test:
-	$(PY) -m pytest mcp/tests/ -q
+	$(PY) -m pytest core/server/tests/ -q
 
 clean:
-	rm -rf $(VENV) mcp/.pytest_cache mcp/dist mcp/src/*.egg-info
-	find mcp -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	rm -rf $(VENV) core/server/.pytest_cache core/server/dist core/server/src/*.egg-info
+	find core/server -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
