@@ -88,7 +88,7 @@ DPD was developed in an unusual loop: the protocol was designed *while running D
 When the v0.3.1 spec draft was almost done, we ran it through this three-step pipeline against itself:
 
 ```text
-/dpd-import scopes/dev.dpd/docs/dpd-v0.3.1-draft.md
+/dpd-import path/to/your-spec.md
     └─ imports the spec prose as an archived subgraph
        (each numbered section becomes a node, headings imply edges)
 
