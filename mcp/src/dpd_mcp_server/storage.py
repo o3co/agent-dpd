@@ -989,69 +989,85 @@ class Storage:
 
         Called by mutation hooks (mark_reached, bulk_import_subgraph,
         delete_subgraph, force_delete_node) and by the v4->v5 backfill.
+
+        Opens its own connection. For callers inside an existing transaction,
+        use ``_reindex_subgraph_on`` directly with the existing conn.
         """
         with self.connect() as conn:
-            conn.execute(
-                "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
-                (start_node_id,),
-            )
-            start = conn.execute(
-                "SELECT id, session_id, type, text, state, archived_at, "
-                "closed_at FROM nodes WHERE id = ?",
-                (start_node_id,),
-            ).fetchone()
-            if start is None:
-                return
-            if start["type"] != "start":
-                return
-            if start["state"] not in ("closed", "archived"):
-                return
+            self._reindex_subgraph_on(conn, start_node_id=start_node_id)
 
-            session_id = start["session_id"]
-            anchor_parts: list[str] = [start["text"] or ""]
-            body_parts: list[str] = []
-            journey_parts: list[str] = []
+    def _reindex_subgraph_on(
+        self, conn: sqlite3.Connection, *, start_node_id: str
+    ) -> None:
+        """Same logic as _reindex_subgraph but operates on a caller-owned conn.
 
-            members = self._subgraph_node_ids(
-                conn, session_id=session_id, start_id=start_node_id
-            )
-            placeholders = ",".join("?" * len(members))
-            rows = conn.execute(
-                f"SELECT id, type, text, paired_for, achievement_conditions "
-                f"FROM nodes WHERE session_id = ? AND id IN ({placeholders}) "
-                f"ORDER BY created_at, id",
-                (session_id, *members),
-            ).fetchall()
-            for r in rows:
-                if r["id"] == start_node_id:
-                    continue
-                text = r["text"] or ""
-                if r["type"] == "end" and r["paired_for"] == start_node_id:
-                    anchor_parts.append(text)
-                    if r["achievement_conditions"]:
-                        anchor_parts.append(r["achievement_conditions"])
-                elif r["type"] in self._BODY_TYPES:
-                    body_parts.append(text)
-                else:
-                    journey_parts.append(text)
+        Performs DELETE + optional INSERT on the given connection. The caller
+        owns the transaction lifecycle (no commit or rollback is issued here).
 
-            closed_at = start["closed_at"] or start["archived_at"]
-            conn.execute(
-                """
-                INSERT INTO subgraphs_fts
-                    (start_node_id, session_id, anchor_text, body_text,
-                     journey_text, closed_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    start_node_id,
-                    session_id,
-                    " ".join(p for p in anchor_parts if p),
-                    " ".join(p for p in body_parts if p),
-                    " ".join(p for p in journey_parts if p),
-                    closed_at,
-                ),
-            )
+        Used by the v4→v5 migration to run the backfill inside a single
+        BEGIN/COMMIT so a backfill failure rolls back the version bump too.
+        """
+        conn.execute(
+            "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
+            (start_node_id,),
+        )
+        start = conn.execute(
+            "SELECT id, session_id, type, text, state, archived_at, "
+            "closed_at FROM nodes WHERE id = ?",
+            (start_node_id,),
+        ).fetchone()
+        if start is None:
+            return
+        if start["type"] != "start":
+            return
+        if start["state"] not in ("closed", "archived"):
+            return
+
+        session_id = start["session_id"]
+        anchor_parts: list[str] = [start["text"] or ""]
+        body_parts: list[str] = []
+        journey_parts: list[str] = []
+
+        members = self._subgraph_node_ids(
+            conn, session_id=session_id, start_id=start_node_id
+        )
+        placeholders = ",".join("?" * len(members))
+        rows = conn.execute(
+            f"SELECT id, type, text, paired_for, achievement_conditions "
+            f"FROM nodes WHERE session_id = ? AND id IN ({placeholders}) "
+            f"ORDER BY created_at, id",
+            (session_id, *members),
+        ).fetchall()
+        for r in rows:
+            if r["id"] == start_node_id:
+                continue
+            text = r["text"] or ""
+            if r["type"] == "end" and r["paired_for"] == start_node_id:
+                anchor_parts.append(text)
+                if r["achievement_conditions"]:
+                    anchor_parts.append(r["achievement_conditions"])
+            elif r["type"] in self._BODY_TYPES:
+                body_parts.append(text)
+            else:
+                journey_parts.append(text)
+
+        closed_at = start["closed_at"] or start["archived_at"]
+        conn.execute(
+            """
+            INSERT INTO subgraphs_fts
+                (start_node_id, session_id, anchor_text, body_text,
+                 journey_text, closed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                start_node_id,
+                session_id,
+                " ".join(p for p in anchor_parts if p),
+                " ".join(p for p in body_parts if p),
+                " ".join(p for p in journey_parts if p),
+                closed_at,
+            ),
+        )
 
     @staticmethod
     def _normalize_query(query: str) -> str:

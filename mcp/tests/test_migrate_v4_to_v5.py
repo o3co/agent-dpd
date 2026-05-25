@@ -130,3 +130,37 @@ def test_skips_active_subgraphs(tmp_db_path: str) -> None:
     with sqlite3.connect(tmp_db_path) as conn:
         count = conn.execute("SELECT count(*) FROM subgraphs_fts").fetchone()[0]
     assert count == 0
+
+
+def test_migration_rolls_back_on_backfill_failure(tmp_db_path: str, monkeypatch) -> None:
+    """If the backfill loop fails partway, user_version must stay at 4 so the
+    next open() retries the migration. Spec §5.5: "backfill 失敗時は transaction
+    rollback、PRAGMA user_version も更新されない".
+    """
+    db_path = _seed_v4_db_with_closed_subgraph(tmp_db_path)
+
+    # Verify pre-condition: this is a real v4 DB.
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+
+    # Sabotage the backfill: make Storage._reindex_subgraph_on raise.
+    # (Assumes Option B1 refactor — the method must exist on Storage.)
+    from dpd_mcp_server.storage import Storage
+
+    def boom(self, conn, *, start_node_id):
+        raise RuntimeError("simulated backfill failure")
+
+    monkeypatch.setattr(Storage, "_reindex_subgraph_on", boom)
+
+    from dpd_mcp_server.migrate_v4_to_v5 import migrate
+    with pytest.raises(RuntimeError, match="simulated backfill failure"):
+        migrate(db_path=db_path)
+
+    # Post-condition: user_version is STILL 4 (rollback happened).
+    with sqlite3.connect(db_path) as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+    assert version == 4, (
+        f"user_version is {version} after failed migration — "
+        "future open() would skip migration and leave DB permanently broken"
+    )
