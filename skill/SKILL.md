@@ -666,7 +666,6 @@ These skills are planned for Phase 4 and will each have their own SKILL.md:
 | `/dpd-dump` | Full graph tree textual dump (wraps `export_yaml` / `export_mermaid`) |
 | `/dpd-summary-md` | Export decided/closed items as markdown summary |
 | `/dpd-edit <node\|pool_id>` | Manual node/pool mutation. Also used for unsuppress: clear `rejected_at` / `rejected_reason` on a pool item. |
-
 | `/dpd-find-similar` | **[v0.3.2]** Retrieval-augmented proposal. User-pull only — Claude may NOT auto-invoke. Returns past closed/archived subgraphs matching a query, then distills selected ones into graph-candidate proposals (no prose lessons). |
 
 **`/fcot` orchestration**: `/dpd-fill` and `/dpd-import` SKILL.md prompts should instruct Claude to invoke `/fcot` when verifying inferred or imported nodes. No code-level integration needed — the skill prompt instruction is sufficient.
