@@ -10,7 +10,7 @@ Development guidelines for AI coding assistants (Claude, Cursor, Copilot, …) a
 - `core/skills/` — Skill family (`/dpd`, `/dpd-status`, `/dpd-fill`, …). Single source of truth for SKILL.md content.
 - `packaging/<agent>/` — Per-agent packaging wrappers (currently `claude-code/`). Each wraps `core/` with the agent's manifest + symlinks; symlinks are dereferenced at install time.
 - `install.sh` — Escape-hatch installer for Cursor (and CI/dev). Not used for Claude Code (plugin system is the install path there).
-- `marketplace.json` — Registers this repo as a Claude Code marketplace.
+- `.claude-plugin/marketplace.json` — Registers this repo as a Claude Code marketplace.
 - `docs/` — Specs, migration guides, ADRs.
 
 The MCP server is stateless w.r.t. conversation; the skill is stateless w.r.t. graph data. Both move together.
@@ -43,7 +43,7 @@ Or to install permanently:
 /plugin install dpd@agent-dpd
 ```
 
-The plugin lays out `~/.claude/plugins/cache/<marketplace>/dpd/` (read-only on update) and `~/.claude/plugins/data/dpd/.venv/` (persistent, venv lazy-bootstrapped by `packaging/claude-code/hooks/session-start.sh`).
+The plugin lays out `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (read-only on update; e.g. `~/.claude/plugins/cache/agent-dpd/dpd/0.4.0/`) and `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (persistent; e.g. `~/.claude/plugins/data/dpd-agent-dpd/.venv/`, venv lazy-bootstrapped by `packaging/claude-code/hooks/session-start.sh`).
 
 Runtime DPD data lives at `~/.claude/dpd-server/data/<encoded-agent-scope>/graph.sqlite`. Override with `DPD_DATA_DIR` (tests use this).
 
