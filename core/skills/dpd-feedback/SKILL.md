@@ -78,13 +78,34 @@ Collect (in this order). All shell expansions MUST use `${VAR:-}` form so that a
 # packaging/claude-code/.claude-plugin/plugin.json does NOT resolve in the
 # installed layout — packaging/ is a build-only directory and is not copied in.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json" ]; then
-  PLUGIN_VERSION=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('version','unknown'))" "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json")
+  # Inner try/except + outer `|| echo "unknown"` give a 2-layer fail-open:
+  # the inner catches malformed/incomplete JSON (corrupted install), the
+  # outer catches a missing python3 binary. The skill's job is to survive
+  # broken local state so users can report it — never crash Step 1.
+  PLUGIN_VERSION=$(python3 -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("version", "unknown"))
+except Exception:
+    print("unknown")' "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo unknown)
 else
   PLUGIN_VERSION="unknown"
 fi
 
-# Server package version
-SERVER_VERSION=$(pip show dpd-mcp-server 2>/dev/null | awk '/^Version:/ {print $2}')
+# Server package version — try the plugin's bundled venv first, since the
+# agent's default PATH rarely has the venv activated. Plain `pip` would
+# silently return empty (rendering as a blank line, worse than "unknown")
+# when the user's host pip doesn't know about dpd-mcp-server.
+SERVER_VERSION=""
+for pip_candidate in \
+    "${CLAUDE_PLUGIN_DATA:-/dev/null}/.venv/bin/pip" \
+    "${DPD_INSTALL_DIR:-$HOME/agent-dpd}/core/server/.venv/bin/pip" \
+    "pip"; do
+  if [ "$pip_candidate" = "pip" ] || [ -x "$pip_candidate" ]; then
+    SERVER_VERSION=$("$pip_candidate" show dpd-mcp-server 2>/dev/null | awk '/^Version:/ {print $2}')
+    [ -n "$SERVER_VERSION" ] && break
+  fi
+done
+SERVER_VERSION="${SERVER_VERSION:-unknown}"
 
 # Agent: detect by checking specific, named environment variables — DO NOT
 # dump or scan the full environment. The variables below are an allow-list;
@@ -92,10 +113,12 @@ SERVER_VERSION=$(pip show dpd-mcp-server 2>/dev/null | awk '/^Version:/ {print $
 # value, because some values are correlation keys (e.g. CLAUDE_CODE_SESSION_ID).
 #
 # Verified empirically (2026-05-26): Claude Code sets `CLAUDECODE=1`.
-# Other agents' canonical env-var names are TBD; until each is verified
-# empirically they MUST record as "unknown" rather than be guessed (a wrong
-# detect string is worse than "unknown" — it routes feedback to the wrong
-# triage bucket).
+# Other agents are deliberately left unmapped — adding a new agent here
+# requires empirically observing its env var in a live session (presence
+# only, never value). A wrong detect string is worse than "unknown" because
+# it routes feedback to the wrong triage bucket. Follow-up enumeration of
+# Cursor / Codex / Aider / Gemini is tracked in
+# https://github.com/o3co/agent-dpd/issues/30.
 if [ -n "${CLAUDECODE:-}" ]; then
   AGENT="claude-code"
 else
