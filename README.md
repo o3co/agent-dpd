@@ -25,6 +25,8 @@ Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and **Pyt
 
 **After install, start a fresh Claude Code session** (open a new terminal `claude` or close+reopen the IDE). `/reload-plugins` or window reload alone may not fire the SessionStart hook on first install, so the venv won't be bootstrapped until a genuinely new session starts. The first new session takes ~10–30s while the hook runs `pip install -e` on the bundled server source.
 
+> **Upgrading from 0.3.x?** If you previously installed via `install.sh`, run `rm -f ~/.claude/skills/dpd ~/.claude/skills/dpd-*` and `claude mcp remove dpd-mcp-server` first so the old symlinks and MCP registration don't shadow the plugin. Your graph data at `~/.claude/dpd-server/data/` is preserved. See [CHANGELOG: Upgrading from 0.3.x](CHANGELOG.md#upgrading-from-03x).
+
 That registers this repo as a Claude Code marketplace and installs the `dpd` plugin. The plugin bundles:
 
 - `/dpd`, `/dpd-status`, `/dpd-dump`, `/dpd-edit`, `/dpd-fill`, `/dpd-find-similar`, `/dpd-import`, `/dpd-summary-md`, `/dpd-feedback` slash commands
