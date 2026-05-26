@@ -59,6 +59,19 @@ All tests must pass before commit. Includes a stdio end-to-end smoke that spawns
 
 The `packaging/<agent>/skills/*` entries are symlinks to `core/skills/*` (single source of truth). On Windows, creating symlinks requires either Developer Mode enabled or an elevated shell (`mklink /D`). Mac/Linux work without special permissions. End users of the plugin are NOT affected — Claude Code dereferences symlinks during plugin cache install, so the installed plugin contains real file copies, no live symlinks.
 
+This dereference behavior is load-bearing for the whole `packaging/claude-code/skills/*` + `core` symlink approach (without it the installed plugin would have dangling relative-path symlinks). Verify manually before any release that touches `packaging/claude-code/` layout:
+
+```bash
+# After /plugin marketplace add o3co/agent-dpd && /plugin install dpd@agent-dpd
+# in a fresh Claude Code session, confirm the installed plugin has real dirs, not symlinks:
+INSTALLED="$HOME/.claude/plugins/cache/agent-dpd/dpd"
+INSTALLED="$INSTALLED/$(ls -1 "$INSTALLED" | sort -V | tail -1)"  # latest version dir
+ls -la "$INSTALLED/skills" "$INSTALLED/core"  # both should be real dirs (d), NOT symlinks (l)
+find "$INSTALLED" -type l                     # should print nothing
+```
+
+If `find -type l` lists anything under the installed plugin, the dereference assumption is broken and the install will fail on machines where the symlink targets don't exist.
+
 ## Development workflow
 
 ### TDD discipline

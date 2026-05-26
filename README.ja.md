@@ -25,6 +25,8 @@ Claude Code スキル + MCP サーバで実現します。
 
 **インストール後は新しい Claude Code セッションを開始してください** (ターミナルで `claude` を新規起動、または IDE を完全に閉じて開き直す)。`/reload-plugins` や window reload だけでは初回 install 時の SessionStart フックが発火しないことがあり、venv が bootstrap されません。新セッションの初回起動は ~10–30s かかります (フックがバンドルされた server source に対して `pip install -e` を走らせるため)。
 
+> **0.3.x からのアップグレード**: 以前 `install.sh` でインストールしていた場合は、先に `rm -f ~/.claude/skills/dpd ~/.claude/skills/dpd-*` と `claude mcp remove dpd-mcp-server` を実行してください。古い symlink と MCP 登録がプラグイン側を shadow しないようにするためです。`~/.claude/dpd-server/data/` のグラフデータは保持されます。詳細は [CHANGELOG: Upgrading from 0.3.x](CHANGELOG.md#upgrading-from-03x) を参照。
+
 このリポジトリを Claude Code のマーケットプレイスとして登録し、`dpd` プラグインをインストールします。プラグインには以下が含まれます:
 
 - `/dpd`, `/dpd-status`, `/dpd-dump`, `/dpd-edit`, `/dpd-fill`, `/dpd-find-similar`, `/dpd-import`, `/dpd-summary-md`, `/dpd-feedback` スラッシュコマンド
