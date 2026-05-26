@@ -17,13 +17,20 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ### Upgrading from 0.3.x
 
-If you installed DPD 0.3.x on Claude Code via `install.sh`, the old skill symlinks and MCP registration are not cleaned automatically by the plugin install. Run these once before `/plugin install dpd@agent-dpd`:
+If you installed DPD 0.3.x on Claude Code via `install.sh`, the old skill symlinks and MCP registration are not cleaned automatically by the plugin install. Run these once before `/plugin install dpd@agent-dpd` (harmless no-op if the old install wasn't actually present):
 
 ```bash
-# 1. Remove old skill symlinks (otherwise both old and new copies of /dpd, /dpd-status, … will be registered and one will shadow the other)
+# 1. Remove old skill symlinks left by install.sh.
+#    If Claude Code still auto-discovers ~/.claude/skills/, leaving them in
+#    place would register a second copy of /dpd, /dpd-status, … alongside
+#    the plugin's copy. If that path is no longer discovered, this is a no-op.
 rm -f ~/.claude/skills/dpd ~/.claude/skills/dpd-*
 
-# 2. Remove the old global MCP registration (the plugin ships its own .mcp.json; leaving the old one around can shadow the plugin's server)
+# 2. Remove the old MCP registration. install.sh used `claude mcp add` without
+#    --scope, which defaults to project-local — so this command only removes
+#    the registration from the *current* directory. If 0.3.x was originally
+#    installed from a different directory, run this from there, or first
+#    inspect with `claude mcp list` to find where the registration lives.
 claude mcp remove dpd-mcp-server 2>/dev/null || true
 ```
 
