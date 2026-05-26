@@ -2,14 +2,6 @@
 # Tests for hooks/session-start.sh — verifies venv is created/refreshed correctly.
 set -euo pipefail
 
-# Cross-platform mtime (macOS: stat -f %m; Linux: stat -c %Y).
-get_mtime() {
-  if stat -f %m "$1" 2>/dev/null; then
-    return 0
-  fi
-  stat -c %Y "$1"
-}
-
 # Setup: temp CLAUDE_PLUGIN_DATA + CLAUDE_PLUGIN_ROOT pointing at a fake src
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -58,7 +50,9 @@ echo "OK: idempotent on identical state"
 # Use a version bump because pip's installed dist-info directory is named
 # `<name>-<version>.dist-info` and renames atomically on reinstall — that's
 # direct evidence pip ran, regardless of pip's wrapper-rewrite optimizations.
-DIST_BEFORE=$(ls "$CLAUDE_PLUGIN_DATA/.venv/lib"/python*/site-packages/ 2>/dev/null | grep -oE 'dpd_mcp_server-[0-9.]+\.dist-info' | head -1)
+# `|| true` guards against `set -euo pipefail` killing the script when grep finds
+# no match — we want the explicit FAIL diagnostic below to fire instead.
+DIST_BEFORE=$(ls "$CLAUDE_PLUGIN_DATA/.venv/lib"/python*/site-packages/ 2>/dev/null | grep -oE 'dpd_mcp_server-[0-9.]+\.dist-info' | head -1 || true)
 [ -n "$DIST_BEFORE" ] || { echo "FAIL: dist-info dir missing after Test 1/2 — pip never ran?"; exit 1; }
 # Cross-platform in-place edit (macOS sed wants -i '', GNU sed wants -i alone);
 # `-i.bak` with explicit suffix removal works on both.
@@ -67,7 +61,7 @@ rm -f "$CLAUDE_PLUGIN_ROOT/core/server/pyproject.toml.bak"
 "$HOOK"
 HASH3=$(cat "$CLAUDE_PLUGIN_DATA/.venv/.requirements-hash")
 [ "$HASH3" != "$HASH2" ] || { echo "FAIL: hash unchanged after pyproject.toml edit"; exit 1; }
-DIST_AFTER=$(ls "$CLAUDE_PLUGIN_DATA/.venv/lib"/python*/site-packages/ 2>/dev/null | grep -oE 'dpd_mcp_server-[0-9.]+\.dist-info' | head -1)
+DIST_AFTER=$(ls "$CLAUDE_PLUGIN_DATA/.venv/lib"/python*/site-packages/ 2>/dev/null | grep -oE 'dpd_mcp_server-[0-9.]+\.dist-info' | head -1 || true)
 [ "$DIST_AFTER" = "dpd_mcp_server-0.4.1.dist-info" ] \
   || { echo "FAIL: dist-info did not reflect version bump (was: $DIST_BEFORE, now: $DIST_AFTER) — pip didn't actually run"; exit 1; }
 echo "OK: pyproject.toml change triggers reinstall (hash + dist-info both advanced)"

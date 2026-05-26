@@ -29,8 +29,15 @@ else
   exit 1
 fi
 
-# Quick exit if venv exists + hash matches + binary present
-if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$CURRENT_HASH" ] && [ -f "$VENV/bin/dpd-mcp-server" ]; then
+# Quick exit if venv exists + hash matches + binary present + python actually runs.
+# Verifying python here (not just below in the healthcheck) is what lets the fast
+# path stay correct: without it, a broken venv (e.g. Homebrew upgraded the
+# underlying python and broke shebangs) whose hash + binary still match would
+# silently exit 0 forever, with the healthcheck below never reached.
+if [ -f "$HASH_FILE" ] \
+   && [ "$(cat "$HASH_FILE")" = "$CURRENT_HASH" ] \
+   && [ -f "$VENV/bin/dpd-mcp-server" ] \
+   && "$VENV/bin/python" -c 'import sys' >/dev/null 2>&1; then
   exit 0
 fi
 
