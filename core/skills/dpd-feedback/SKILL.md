@@ -69,18 +69,38 @@ If no argument is provided: ask the user for a short description (1-2 sentences)
 
 ### Step 1: Gather system metadata
 
-Collect (in this order):
+Collect (in this order). All shell expansions MUST use `${VAR:-}` form so that a missing env var records as "unknown" rather than crashing under `set -u`.
 
 ```bash
-# Plugin version: read packaging/claude-code/.claude-plugin/plugin.json if accessible,
-# otherwise note as "unknown"
-PLUGIN_VERSION=...
+# Plugin version: read from the *installed* plugin's manifest, not the source tree.
+# Claude Code sets CLAUDE_PLUGIN_ROOT to the installed plugin's cache directory
+# (e.g. ~/.claude/plugins/cache/agent-dpd/dpd/0.4.0/). The source-tree path
+# packaging/claude-code/.claude-plugin/plugin.json does NOT resolve in the
+# installed layout — packaging/ is a build-only directory and is not copied in.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json" ]; then
+  PLUGIN_VERSION=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('version','unknown'))" "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json")
+else
+  PLUGIN_VERSION="unknown"
+fi
 
 # Server package version
 SERVER_VERSION=$(pip show dpd-mcp-server 2>/dev/null | awk '/^Version:/ {print $2}')
 
-# Agent: detect (Claude Code sets CLAUDE_CODE env or similar; fallback to "unknown")
-AGENT=...
+# Agent: detect by checking specific, named environment variables — DO NOT
+# dump or scan the full environment. The variables below are an allow-list;
+# anything not matched records as "unknown". Only presence is used, never the
+# value, because some values are correlation keys (e.g. CLAUDE_CODE_SESSION_ID).
+#
+# Verified empirically (2026-05-26): Claude Code sets `CLAUDECODE=1`.
+# Other agents' canonical env-var names are TBD; until each is verified
+# empirically they MUST record as "unknown" rather than be guessed (a wrong
+# detect string is worse than "unknown" — it routes feedback to the wrong
+# triage bucket).
+if [ -n "${CLAUDECODE:-}" ]; then
+  AGENT="claude-code"
+else
+  AGENT="unknown"
+fi
 
 # Python
 PYTHON_VERSION=$(python3 --version 2>&1)
