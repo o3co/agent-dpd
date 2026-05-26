@@ -1,0 +1,31 @@
+name: Hook tests
+
+# Runs the session-start.sh bash test suite on Linux and macOS so that
+# cross-platform divergences (sed -i quirks, stat -f vs -c, BSD vs GNU
+# coreutils) are caught in CI rather than at user install time.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  hook-tests:
+    name: session-start.sh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify python3.11 is callable as `python3.11`
+        run: python3.11 --version
+      - name: Run hook test suite
+        run: bash packaging/claude-code/hooks/tests/test_session_start.sh
