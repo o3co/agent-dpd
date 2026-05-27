@@ -489,7 +489,7 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `list_unblocked_open_nodes(session_id, root_id?, blocker_edge_type?)` | Open nodes that no open node is blocking via the given edge type (default `'blocks'`). |
 | `add_edge(session_id, from_node, to_node, type, reason?)` | Insert a free-form-typed edge between nodes. |
 | `list_edges(session_id, from_node?, to_node?, type?)` | List edges with optional filters (AND'd). |
-| `export_mermaid(session_id, root_id?)` | Render as Mermaid `graph TD` text. |
+| `export_mermaid(session_id, root_id?, max_label_chars?)` | Render as Mermaid `graph TD` text. `max_label_chars` caps node label length (default 60, ellipsis on overflow). Pass `null` to disable truncation — use when embedding in README/docs where full labels matter. |
 | `export_yaml(session_id, root_id?)` | JSON-formatted YAML dump (json.loads round-trippable). |
 | `get_node(session_id, node_id)` | Fetch single node. |
 | `walk_subtree(session_id, root_id)` | All descendants of root (pre-order). |

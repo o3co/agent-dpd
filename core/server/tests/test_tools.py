@@ -873,6 +873,79 @@ def test_export_mermaid_filters_to_one_root(storage: Storage) -> None:
     assert "qb" not in out
 
 
+_LONG_TEXT = (
+    "this is a deliberately long node text that will exceed the default 60 "
+    "character truncation budget so we can verify behavior"
+)
+
+
+def test_export_mermaid_default_truncates_long_labels(storage: Storage) -> None:
+    """Default behavior: labels longer than 60 chars get a trailing ellipsis."""
+    sid = _seed_small_decision_tree(storage)
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_a",
+                   "type": "question", "text": _LONG_TEXT},
+        now="2026-05-27T10:05:00Z",
+        new_id=lambda p: "qlong",
+    )
+
+    out = export_mermaid(
+        storage=storage, arguments={"session_id": sid}
+    )["mermaid"]
+    qlines = [l for l in out.split("\n") if "qlong" in l and "question" in l]
+    assert qlines
+    assert "…" in qlines[0]
+
+
+def test_export_mermaid_max_label_chars_none_disables_truncation(
+    storage: Storage,
+) -> None:
+    """Issue #14: max_label_chars=None must yield full text, no ellipsis."""
+    sid = _seed_small_decision_tree(storage)
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_a",
+                   "type": "question", "text": _LONG_TEXT},
+        now="2026-05-27T10:05:00Z",
+        new_id=lambda p: "qfull",
+    )
+
+    out = export_mermaid(
+        storage=storage,
+        arguments={"session_id": sid, "max_label_chars": None},
+    )["mermaid"]
+    qlines = [l for l in out.split("\n") if "qfull" in l and "question" in l]
+    assert qlines
+    assert "…" not in qlines[0]
+    assert _LONG_TEXT in qlines[0]
+
+
+def test_export_mermaid_max_label_chars_custom_width(storage: Storage) -> None:
+    """Issue #14: max_label_chars=N truncates at N (inclusive of ellipsis)."""
+    sid = _seed_small_decision_tree(storage)
+    add_node(
+        storage=storage,
+        arguments={"session_id": sid, "parent_id": "root_a",
+                   "type": "question", "text": _LONG_TEXT},
+        now="2026-05-27T10:05:00Z",
+        new_id=lambda p: "qsmall",
+    )
+
+    out = export_mermaid(
+        storage=storage,
+        arguments={"session_id": sid, "max_label_chars": 20},
+    )["mermaid"]
+    qlines = [l for l in out.split("\n") if "qsmall" in l and "question" in l]
+    assert qlines
+    inner = qlines[0].split('"', 1)[1].rsplit('"', 1)[0]
+    # inner = "question: <truncated text>"; the truncated text portion
+    # should be 20 chars including ellipsis.
+    assert "…" in inner
+    truncated_payload = inner.split(": ", 1)[1]
+    assert len(truncated_payload) == 20
+
+
 def test_export_mermaid_sanitizes_special_chars(storage: Storage) -> None:
     """Pipes and quotes in text must be sanitized so Mermaid parses."""
     sid = _seed_small_decision_tree(storage)
