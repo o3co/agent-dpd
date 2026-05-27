@@ -42,7 +42,7 @@ Each sub-skill is a directory with its own `SKILL.md`. They are independently in
 | [`dpd-fill`](dpd-fill/) | Generate inferred nodes for the current graph: missing decompositions, unstated assumptions, gap candidates. Each inferred node requires user opt-in. Often paired with `/fcot` for falsification. |
 | [`dpd-import`](dpd-import/) | Import an external prose/spec/graph document as a hypothetical archived DPD subgraph. Used in the `dpd-import → dpd-fill → /fcot` pipeline for systematic gap analysis (e.g., self-validating a spec). |
 
-The `dpd-import → dpd-fill → /fcot` pipeline is the **self-validation** flow that the v0.3.1 spec itself was checked against. See the top-level [`README.md`](../README.md#built-agent-driven-with-dpd) for the dogfood narrative.
+The `dpd-import → dpd-fill → /fcot` pipeline is **one documented** self-validation flow — the same one the v0.3.1 spec itself was checked against. `/fcot` runs automatically on high-stakes inferred nodes and is opt-in elsewhere, so the pipeline's verification cost scales with the rigor you need. See the top-level [`README.md`](../README.md#built-agent-driven-with-dpd) for the dogfood narrative.
 
 ## Installation
 
