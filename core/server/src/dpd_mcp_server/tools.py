@@ -344,6 +344,28 @@ def list_unblocked_open_nodes(
     return {"nodes": [_row_to_dict(r) for r in rows]}
 
 
+def purge_session(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    storage.purge_session(session_id=session_id, now=now)
+    return {"purged_session_id": session_id}
+
+
+def force_purge_session(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    storage.force_purge_session(session_id=session_id, now=now)
+    return {"purged_session_id": session_id, "forced": True}
+
+
 def resolve_hypothesis_branch(
     *,
     storage: Storage,

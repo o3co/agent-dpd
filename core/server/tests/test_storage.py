@@ -2179,6 +2179,111 @@ def test_delete_subgraph_removes_nodes_and_edges(tmp_db_path: str) -> None:
     assert storage.get_node(session_id="ses_1", node_id="n_e") is None
 
 
+def test_purge_session_removes_idle_session_with_no_nodes(tmp_db_path: str) -> None:
+    """Issue #12: purge_session deletes session+roots rows after subgraphs are gone."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_p", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r_p", session_id="ses_p", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.set_session_mode(session_id="ses_p", mode="idle",
+                             now="2026-05-22T00:10:00Z")
+
+    storage.purge_session(session_id="ses_p", now="2026-05-22T01:00:00Z")
+
+    assert storage.get_session(session_id="ses_p") is None
+    assert storage.get_root(session_id="ses_p", root_id="r_p") is None
+
+
+def test_purge_session_rejects_active_session_mode(tmp_db_path: str) -> None:
+    """purge_session must refuse sessions that are not idle (avoid clobbering work)."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_a", scope=None, label=None,
+                           mode="ambient", now="2026-05-22T00:00:00Z")
+    with pytest.raises(ValueError, match="must be 'idle'"):
+        storage.purge_session(session_id="ses_a", now="2026-05-22T01:00:00Z")
+
+
+def test_purge_session_rejects_when_nodes_remain(tmp_db_path: str) -> None:
+    """Caller must delete subgraphs first; purge does not cascade."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_n", scope=None, label=None,
+                           mode="idle", now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r_n", session_id="ses_n", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_x", session_id="ses_n", node_type="start",
+                           text="s", parent_id="r_n",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    with pytest.raises(ValueError, match="nodes remain"):
+        storage.purge_session(session_id="ses_n", now="2026-05-22T01:00:00Z")
+
+
+def test_purge_session_preserves_pool_items_in_scope(tmp_db_path: str) -> None:
+    """Pool items belong to the scope, not the session. origin_session_id is
+    nulled on the purged session, but the pool item row survives."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_pp", scope="demo", label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r_pp", session_id="ses_pp", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.set_session_mode(session_id="ses_pp", mode="idle",
+                             now="2026-05-22T00:10:00Z")
+    scope_root = storage.get_or_create_scope_root(
+        scope="demo", now="2026-05-22T00:15:00Z",
+    )
+    storage.insert_pool_item(
+        pool_id="pool_xyz", scope_root_id=scope_root["id"],
+        text="a stray observation", origin_session_id="ses_pp",
+        origin_turn=None, tags=None,
+        now="2026-05-22T00:20:00Z",
+    )
+
+    storage.purge_session(session_id="ses_pp", now="2026-05-22T01:00:00Z")
+
+    items = storage.list_pool_items(
+        scope_root_id=scope_root["id"], active_only=False,
+    )
+    assert len(items) == 1
+    assert items[0]["id"] == "pool_xyz"
+    assert items[0]["origin_session_id"] is None
+
+
+def test_purge_session_unknown_id_raises(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    with pytest.raises(ValueError, match="not found"):
+        storage.purge_session(session_id="ses_ghost",
+                              now="2026-05-22T01:00:00Z")
+
+
+def test_force_purge_session_cascades_active_session(tmp_db_path: str) -> None:
+    """force_purge_session bypasses mode + node-remaining checks (emergency)."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_f", scope=None, label=None,
+                           mode="ambient", now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r_f", session_id="ses_f", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_fs", session_id="ses_f", node_type="start",
+                           text="s", parent_id="r_f",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_fe", session_id="ses_f", node_type="end",
+                           text="e", parent_id="n_fs",
+                           paired_for="n_fs",
+                           achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.add_edge(session_id="ses_f", from_node="n_fs", to_node="n_fe",
+                     edge_type="contributes_to", reason=None,
+                     now="2026-05-22T00:00:00Z")
+
+    storage.force_purge_session(session_id="ses_f",
+                                now="2026-05-22T01:00:00Z")
+
+    assert storage.get_session(session_id="ses_f") is None
+    assert storage.get_node(session_id="ses_f", node_id="n_fs") is None
+    assert storage.list_edges(session_id="ses_f") == []
+
+
 def test_get_or_create_scope_root_top_level_uses_empty_string_sentinel(tmp_db_path: str) -> None:
     """scope=None should be normalized to empty-string sentinel internally."""
     storage = Storage.open(tmp_db_path)
