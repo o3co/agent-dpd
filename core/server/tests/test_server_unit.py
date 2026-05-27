@@ -146,6 +146,19 @@ def test_add_edge_schema_enumerates_canonical_types() -> None:
     }
 
 
+def test_purge_session_in_tool_registry() -> None:
+    """Issue #12: purge_session + force_purge_session must be advertised."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+    tools = asyncio.run(list_tools())
+    names = {t.name for t in tools}
+    assert "purge_session" in names
+    assert "force_purge_session" in names
+
+    purge = next(t for t in tools if t.name == "purge_session")
+    assert purge.inputSchema["required"] == ["session_id"]
+
+
 def test_find_similar_dispatched_by_call_tool(tmp_path, monkeypatch) -> None:
     """call_tool routes name='find_similar' to tools.find_similar."""
     import asyncio

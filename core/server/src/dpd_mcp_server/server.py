@@ -799,6 +799,49 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="purge_session",
+            title="Purge session",
+            description=(
+                "Remove the session row, its roots, and edge/pool back-refs "
+                "after all subgraphs have been delete-d. Precondition: "
+                "session.mode is null or 'idle' AND no nodes remain. Pool "
+                "items belong to the scope — their origin_session_id is "
+                "nulled but the items themselves survive."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="force_purge_session",
+            title="Force purge session",
+            description=(
+                "Cascade-delete a session and every node/edge/scaffolding "
+                "row attached to it. Emergency / cleanup only — skips the "
+                "mode and no-nodes preconditions purge_session enforces. "
+                "Pool items survive (origin_session_id nulled)."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
             name="resolve_hypothesis_branch",
             title="Accept hypothesis (atomic decision)",
             description=(
@@ -1035,6 +1078,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.delete(storage, arguments=tool_args, now=now)
     if name == "force_delete":
         return tools.force_delete(storage, arguments=tool_args, now=now)
+    if name == "purge_session":
+        return tools.purge_session(storage=storage, arguments=tool_args, now=now)
+    if name == "force_purge_session":
+        return tools.force_purge_session(
+            storage=storage, arguments=tool_args, now=now,
+        )
     if name == "pool_add":
         scope = tool_args.get("scope") or None
         return tools.pool_add(

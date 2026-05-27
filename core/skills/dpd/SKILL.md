@@ -527,6 +527,8 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `dump_persist(session_id, start_node_id, destination?)` | Record externalization of a closed subgraph → transitions to deletable. |
 | `delete(session_id, start_node_id)` | Physical delete of a deletable subgraph. |
 | `force_delete(session_id, node_id)` | Single-node force delete (emergency only). |
+| `purge_session(session_id)` | Remove the session row + roots + edge/pool back-refs once all subgraphs were `delete`d. Precondition: session is `idle` (or null) and no nodes remain. Pool items survive (origin_session_id nulled). |
+| `force_purge_session(session_id)` | Cascade-delete an entire session — nodes, edges, roots, the session row. Emergency only; bypasses preconditions. |
 | `bulk_import_subgraph(session_id, root_id, nodes, edges, provenance?, state?)` | **[v0.3.1]** Atomic batch insert of multiple nodes + edges with provenance/state. `provenance` defaults to `'imported'`, `state` defaults to `'archived'`. Used by `/dpd-import`. |
 | `find_similar(query, scope?, top_k?, include_open?)` | **[v0.3.2]** Retrieve closed/archived subgraphs whose FTS5 index matches the query. `scope` narrows to a sub-scope (None = all). `include_open=True` also covers active subgraphs via dynamic LIKE. Returns `{results: [SubgraphSummary, ...]}`. |
 

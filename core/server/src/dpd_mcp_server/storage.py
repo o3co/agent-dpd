@@ -1739,6 +1739,109 @@ class Storage:
             )
             self._touch_session(conn, session_id=session_id, now=now)
 
+    def purge_session(self, *, session_id: str, now: str) -> None:
+        """Physically remove a finished session and its scaffolding rows.
+
+        Preconditions:
+          - session exists
+          - session.mode is null or 'idle' (active work is never silently dropped)
+          - no nodes remain in the session (caller is expected to have run
+            ``delete_subgraph`` for each subgraph first)
+
+        Cleanup order respects the FK graph:
+          1. drop edges in the session (no nodes left to anchor them)
+          2. null ``pool_items.origin_session_id`` for items captured by this
+             session (pool items belong to the scope, not the session)
+          3. drop roots whose ``session_id`` points here
+          4. drop the session row
+
+        Use ``force_purge_session`` to bypass preconditions in an emergency.
+        """
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT mode FROM sessions WHERE id = ?", (session_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"session {session_id!r} not found")
+            if row["mode"] not in (None, "idle"):
+                raise ValueError(
+                    f"session {session_id!r} mode is {row['mode']!r}; "
+                    f"must be 'idle' (or null) to purge. Use "
+                    f"force_purge_session to bypass."
+                )
+            remaining = conn.execute(
+                "SELECT COUNT(*) AS c FROM nodes WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()["c"]
+            if remaining > 0:
+                raise ValueError(
+                    f"session {session_id!r}: {remaining} nodes remain. "
+                    f"Run delete_subgraph for each subgraph first, or use "
+                    f"force_purge_session to cascade-delete."
+                )
+            self._purge_session_impl(conn, session_id=session_id, now=now)
+
+    def force_purge_session(self, *, session_id: str, now: str) -> None:
+        """Cascade-delete a session and everything attached to it.
+
+        Emergency / cleanup use. Skips the mode + no-nodes checks
+        ``purge_session`` enforces. Removes FTS rows for any subgraph in
+        the session, breaks intra-session ``paired_for`` references, then
+        proceeds through the same FK-respecting cleanup as ``purge_session``.
+        """
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ?", (session_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"session {session_id!r} not found")
+            start_ids = [
+                r["id"] for r in conn.execute(
+                    "SELECT id FROM nodes "
+                    "WHERE session_id = ? AND type = 'start'",
+                    (session_id,),
+                ).fetchall()
+            ]
+            for sid in start_ids:
+                conn.execute(
+                    "DELETE FROM subgraphs_fts WHERE start_node_id = ?", (sid,),
+                )
+            conn.execute(
+                "UPDATE nodes SET paired_for = NULL WHERE session_id = ?",
+                (session_id,),
+            )
+            conn.execute(
+                "UPDATE pool_items SET elevated_to = NULL "
+                "WHERE elevated_to IN (SELECT id FROM nodes WHERE session_id = ?)",
+                (session_id,),
+            )
+            conn.execute(
+                "DELETE FROM nodes WHERE session_id = ?", (session_id,),
+            )
+            self._purge_session_impl(conn, session_id=session_id, now=now)
+
+    def _purge_session_impl(
+        self, conn: sqlite3.Connection, *, session_id: str, now: str,
+    ) -> None:
+        """Shared tail of purge_session / force_purge_session.
+
+        Assumes no nodes remain in the session (caller's responsibility).
+        """
+        conn.execute(
+            "DELETE FROM edges WHERE session_id = ?", (session_id,),
+        )
+        conn.execute(
+            "UPDATE pool_items SET origin_session_id = NULL "
+            "WHERE origin_session_id = ?",
+            (session_id,),
+        )
+        conn.execute(
+            "DELETE FROM roots WHERE session_id = ?", (session_id,),
+        )
+        conn.execute(
+            "DELETE FROM sessions WHERE id = ?", (session_id,),
+        )
+
     # ------------------------------------------------------------------
     # v0.3.1 Task 6: session mode lifecycle
     # ------------------------------------------------------------------
