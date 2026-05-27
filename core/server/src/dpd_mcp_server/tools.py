@@ -317,6 +317,18 @@ def list_edges(
     return {"edges": [_row_to_dict(r) for r in rows]}
 
 
+def delete_edge(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    edge_id = _required(arguments, "edge_id")
+    storage.delete_edge(session_id=session_id, edge_id=int(edge_id), now=now)
+    return {"deleted_edge_id": int(edge_id)}
+
+
 def list_unblocked_open_nodes(
     *,
     storage: Storage,

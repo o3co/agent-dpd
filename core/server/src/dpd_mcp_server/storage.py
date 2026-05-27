@@ -524,6 +524,11 @@ class Storage:
             nodes = [n for n in nodes if n["state"] == state]
         return nodes
 
+    EDGE_TYPES = frozenset({
+        "derived_from", "requires", "blocks", "supports", "contradicts",
+        "contributes_to", "supersedes", "qualifies", "invalidates",
+    })
+
     def add_edge(
         self,
         *,
@@ -534,14 +539,27 @@ class Storage:
         reason: str | None,
         now: str,
     ) -> int:
-        """Insert an edge row, validating both endpoints first.
+        """Insert an edge row, validating type, endpoints, and shape.
 
         Both ``from_node`` and ``to_node`` must reference an existing row in
         the same session — either a node (nodes.id) OR a root (roots.id).
         The edges schema has no FK constraint (parent-kind polymorphism makes
         a literal FK impossible), so validation is enforced in app code.
-        Raises ValueError if either endpoint is missing.
+
+        ``edge_type`` must be in ``EDGE_TYPES``. Self-loops (from_node ==
+        to_node) are rejected — every edge type in the vocabulary is
+        directional between distinct entities.
         """
+        if edge_type not in self.EDGE_TYPES:
+            raise ValueError(
+                f"edge_type {edge_type!r} not in canonical vocabulary "
+                f"{sorted(self.EDGE_TYPES)}"
+            )
+        if from_node == to_node:
+            raise ValueError(
+                f"self-loop rejected: from_node and to_node are both "
+                f"{from_node!r}"
+            )
         with self.connect() as conn:
             for label, endpoint in (("from_node", from_node), ("to_node", to_node)):
                 exists = conn.execute(
@@ -563,6 +581,28 @@ class Storage:
             )
             self._touch_session(conn, session_id=session_id, now=now)
             return cursor.lastrowid
+
+    def delete_edge(
+        self,
+        *,
+        session_id: str,
+        edge_id: int,
+        now: str,
+    ) -> None:
+        """Delete a single edge by id within the session.
+
+        Raises ValueError if no edge with that id exists in the session.
+        """
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM edges WHERE session_id = ? AND id = ?",
+                (session_id, edge_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(
+                    f"edge_id {edge_id!r} not found in session {session_id!r}"
+                )
+            self._touch_session(conn, session_id=session_id, now=now)
 
     def resolve_hypothesis_branch(
         self,
@@ -1948,6 +1988,17 @@ class Storage:
                 to_node = edge_spec["to"]
                 edge_type = edge_spec["type"]
                 reason = edge_spec.get("reason") or None
+
+                if edge_type not in self.EDGE_TYPES:
+                    raise ValueError(
+                        f"bulk_import: edge_type {edge_type!r} not in "
+                        f"canonical vocabulary {sorted(self.EDGE_TYPES)}"
+                    )
+                if from_node == to_node:
+                    raise ValueError(
+                        f"bulk_import: self-loop rejected: "
+                        f"from and to are both {from_node!r}"
+                    )
 
                 # Validate both endpoints
                 for label, endpoint in (("from", from_node), ("to", to_node)):
