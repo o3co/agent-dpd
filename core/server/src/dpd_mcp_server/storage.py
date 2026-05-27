@@ -1551,7 +1551,12 @@ class Storage:
             ):
                 raise ValueError(
                     f"end node {end_node_id!r} not reachable from "
-                    f"paired start {start_id!r}"
+                    f"paired start {start_id!r} via parent_id chain. "
+                    f"Canonical layout: End must be a descendant of Start "
+                    f"in the parent_id tree (e.g. root → Start → ... → End). "
+                    f"Re-parent End so its parent_id chain reaches Start "
+                    f"(use force_delete on End and re-add with parent_id="
+                    f"{start_id!r} or under a Start-descendant node)."
                 )
             # Collect all nodes in the subgraph (start + descendants via parent_id forward walk).
             subgraph_ids = self._subgraph_node_ids(
