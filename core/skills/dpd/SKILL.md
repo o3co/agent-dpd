@@ -314,6 +314,29 @@ root_abc (TBD 4)
 
 Rationale: Full Mermaid at every pause is expensive. Numbered lists lose spatial context. Hierarchical list gives both spatial anchoring and text clarity.
 
+#### §4.5.1 Severity-aware grouping (questions / cross-doc review) [v0.4]
+
+When surfacing many `question` nodes at one pause — typical in cross-document or spec-review sessions — pre-classify each with `severity` (`'logical'` / `'surface'` / `'cosmetic'`) on `add_node`, then group the §4.5 proposal listing by severity:
+
+```text
+ここまでを整理させてください:
+
+logical (要対応):
+  - q_xx ← <real logical break>
+  - q_yy ← <numerical claim contradicts §3>
+
+surface (確認のみ、まとめて dismiss 可):
+  - q_aa ← <rhetorical phrasing drift>
+  - q_bb ← <threshold vs evidence gap, claim still stands>
+
+cosmetic:
+  - q_cc ← <typo / formatting>
+
+「surface 以下まとめて却下」「logical を 1 件ずつ確認」など指示してください。
+```
+
+Severity is optional and free-form (the schema accepts any string). Skip it for single-question or low-volume sessions — the grouping overhead doesn't pay off then.
+
 ### §4.6 User reaction handling
 
 | Reaction | Processing |
@@ -502,7 +525,7 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `get_session_state(session_id)` | Session + active_roots + focus_node. |
 | `set_session_mode(session_id, mode)` | **[v0.3.1]** Transition session.mode per §9.1.1 table. Valid modes: `'entry'`, `'ambient'`, `'idle'`. Call on §3.5 OK (→ ambient), §5 completion (→ idle), resume into idle. |
 | `spawn_root(session_id, topic, reason?)` | Create new root topic → `{root: {...}}` (full row). |
-| `add_node(session_id, parent_id, type, text, paired_for?, achievement_conditions?, provenance?, state?)` | Add child node. **[v0.3.1]** `provenance` ∈ `'grounded'`/`'inferred'`/`'imported'`/`'manual'` (default `'grounded'`). `state` allows `'archived'` for `/dpd-import` use. End nodes require `paired_for=<start_node_id>`. |
+| `add_node(session_id, parent_id, type, text, paired_for?, achievement_conditions?, provenance?, state?, severity?)` | Add child node. **[v0.3.1]** `provenance` ∈ `'grounded'`/`'inferred'`/`'imported'`/`'manual'` (default `'grounded'`). `state` allows `'archived'` for `/dpd-import` use. End nodes require `paired_for=<start_node_id>`. **[v0.4]** `severity` is optional proposer-assigned classification (conventional values: `'logical'`/`'surface'`/`'cosmetic'`) used by §4.5 grouping. |
 | `close_node(session_id, node_id, closure_reason)` | Mark resolved / rejected / invalidated. |
 | `resolve_hypothesis_branch(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + auto-insert `derived_from` edge (decision → accepted hypothesis) + insert rationale if any. |
 | `resolve_branch(session_id, parent_id, parent_kind, results, decision_text?, rationale_text?, derived_from_node_ids?)` | Atomically close N sibling nodes with per-node closure_reason. Generic counterpart to `resolve_hypothesis_branch`. |

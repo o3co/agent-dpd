@@ -164,6 +164,16 @@ async def list_tools() -> list[types.Tool]:
                         "enum": ["active", "archived", "closed", "deletable", "gone"],
                         "description": "Node state (default 'active'). Used by /dpd-import to start archived.",
                     },
+                    "severity": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "Optional proposer-assigned severity used by §4.5 "
+                            "natural-pause grouping. Conventional values for "
+                            "question nodes: 'logical' (real logical break), "
+                            "'surface' (rhetorical / numerical drift), 'cosmetic'. "
+                            "Free-form; vocabulary can extend."
+                        ),
+                    },
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",

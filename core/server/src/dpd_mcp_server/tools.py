@@ -81,10 +81,16 @@ def add_node(
     achievement_conditions = arguments.get("achievement_conditions") or None
     provenance = arguments.get("provenance") or "grounded"
     state = arguments.get("state") or "active"
+    severity = arguments.get("severity") or None
 
     nid = new_id("node")
 
-    is_v3 = node_type in _V3_NODE_TYPES or paired_for is not None or achievement_conditions is not None
+    is_v3 = (
+        node_type in _V3_NODE_TYPES
+        or paired_for is not None
+        or achievement_conditions is not None
+        or severity is not None
+    )
     if is_v3:
         try:
             storage.insert_node_v3(
@@ -98,6 +104,7 @@ def add_node(
                 now=now,
                 provenance=provenance,
                 state=state,
+                severity=severity,
             )
         except sqlite3.IntegrityError as exc:
             raise ValueError(
