@@ -1113,7 +1113,7 @@ class Storage:
                     f.session_id    AS session_id,
                     f.anchor_text   AS anchor_text,
                     -bm25(subgraphs_fts, 3.0, 2.0, 1.0) AS score,
-                    snippet(subgraphs_fts, 2, '[', ']', '…', 16) AS snippet
+                    snippet(subgraphs_fts, -1, '[', ']', '…', 16) AS snippet
                 FROM subgraphs_fts f
                 JOIN sessions s ON f.session_id = s.id
                 WHERE subgraphs_fts MATCH ?

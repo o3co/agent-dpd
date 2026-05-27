@@ -109,6 +109,55 @@ def test_find_similar_top_k_respected(tmp_db_path: str) -> None:
     assert len(results) <= 1
 
 
+def test_find_similar_snippet_picks_matching_column(tmp_db_path: str) -> None:
+    """Issue #3: snippet must come from the column that actually matched the
+    query, not always from anchor_text. When a query matches only body_text
+    (decision/rationale/etc.), the snippet must contain the matched term."""
+    storage = Storage.open(tmp_db_path)
+    now = "2026-05-23T00:00:00Z"
+    with storage.connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) "
+            "VALUES ('ses_snip', ?, ?)", (now, now),
+        )
+        conn.execute(
+            "INSERT INTO roots (id, session_id, topic, lifecycle, spawned_at) "
+            "VALUES ('root_snip', 'ses_snip', 'r', 'active', ?)", (now,),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, closed_at, created_at, updated_at) "
+            "VALUES ('s_snip', 'ses_snip', 'start', 'plain start text', 'closed', "
+            "'root_snip', 'root', 'closed', ?, ?, ?)", (now, now, now),
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, paired_for, achievement_conditions, state, closed_at, "
+            "created_at, updated_at) "
+            "VALUES ('e_snip', 'ses_snip', 'end', 'plain end', 'closed', "
+            "'s_snip', 'node', 's_snip', 'plain conditions', 'closed', ?, ?, ?)",
+            (now, now, now),
+        )
+        # Decision child = body_text; contains BODYNEEDLE that anchor lacks.
+        conn.execute(
+            "INSERT INTO nodes (id, session_id, type, text, status, parent_id, "
+            "parent_kind, state, closed_at, created_at, updated_at) "
+            "VALUES ('d_snip', 'ses_snip', 'decision', "
+            "'BODYNEEDLE chosen as final answer', 'closed', 's_snip', 'node', "
+            "'closed', ?, ?, ?)", (now, now, now),
+        )
+    storage._reindex_subgraph(start_node_id="s_snip")
+
+    results = storage.find_similar(query="bodyneedle", top_k=5)
+    assert len(results) == 1
+    snippet = results[0]["matched_snippet"]
+    assert snippet is not None
+    assert "bodyneedle" in snippet.lower(), (
+        f"snippet should come from body_text where BODYNEEDLE matched; "
+        f"got: {snippet!r}"
+    )
+
+
 def test_find_similar_returns_archived_subgraphs(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     now = "2026-05-23T00:00:00Z"
