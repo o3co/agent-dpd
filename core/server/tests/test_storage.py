@@ -793,6 +793,86 @@ def test_add_edge_rejects_unknown_to_node(tmp_db_path: str) -> None:
         )
 
 
+def test_add_edge_rejects_unknown_edge_type(tmp_db_path: str) -> None:
+    """Issue #10: add_edge must reject types outside the canonical vocabulary."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    with pytest.raises(ValueError, match="edge_type"):
+        storage.add_edge(
+            session_id="ses_1",
+            from_node="n1", to_node="n2",
+            edge_type="noop", reason=None,
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def test_add_edge_rejects_self_loop(tmp_db_path: str) -> None:
+    """Issue #10: self-loops (from == to) are not meaningful and must be rejected."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    with pytest.raises(ValueError, match="self-loop"):
+        storage.add_edge(
+            session_id="ses_1",
+            from_node="n1", to_node="n1",
+            edge_type="qualifies", reason=None,
+            now="2026-05-20T11:00:00Z",
+        )
+
+
+def test_add_edge_canonical_vocabulary_accepted(tmp_db_path: str) -> None:
+    """All canonical edge types from SKILL.md must remain accepted."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    canonical = (
+        "derived_from", "requires", "blocks", "supports", "contradicts",
+        "contributes_to", "supersedes", "qualifies", "invalidates",
+    )
+    for i, t in enumerate(canonical):
+        storage.add_edge(
+            session_id="ses_1",
+            from_node="n1", to_node="n2",
+            edge_type=t, reason=None,
+            now=f"2026-05-20T11:{i:02d}:00Z",
+        )
+    rows = storage.list_edges(session_id="ses_1")
+    assert {r["type"] for r in rows} == set(canonical)
+
+
+def test_delete_edge_removes_edge(tmp_db_path: str) -> None:
+    """Issue #10: delete_edge must remove an edge by id and touch the session."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1",
+        from_node="n1", to_node="n2",
+        edge_type="requires", reason="dep",
+        now="2026-05-20T11:00:00Z",
+    )
+    assert len(storage.list_edges(session_id="ses_1")) == 1
+
+    storage.delete_edge(
+        session_id="ses_1", edge_id=edge_id,
+        now="2026-05-20T11:30:00Z",
+    )
+    assert storage.list_edges(session_id="ses_1") == []
+    session = storage.get_session(session_id="ses_1")
+    assert session["updated_at"] == "2026-05-20T11:30:00Z"
+
+
+def test_delete_edge_unknown_id_raises(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    with pytest.raises(ValueError, match="edge_id"):
+        storage.delete_edge(
+            session_id="ses_1", edge_id=99999,
+            now="2026-05-20T11:00:00Z",
+        )
+
+
 def test_add_edge_touches_session_updated_at(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     _seed_two_endpoints(storage)

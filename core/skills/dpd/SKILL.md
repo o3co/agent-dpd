@@ -510,7 +510,8 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred`. |
 | `list_open_nodes(session_id, root_id?, state?)` | Open nodes in session or within one root. `state` filter narrows by node state string. |
 | `list_unblocked_open_nodes(session_id, root_id?, blocker_edge_type?)` | Open nodes that no open node is blocking via the given edge type (default `'blocks'`). |
-| `add_edge(session_id, from_node, to_node, type, reason?)` | Insert a free-form-typed edge between nodes. |
+| `add_edge(session_id, from_node, to_node, type, reason?)` | Insert an edge between nodes. `type` is enforced against the canonical vocabulary (see Edge type table below). Self-loops rejected. |
+| `delete_edge(session_id, edge_id)` | Delete a single edge by id. Use to clean up mis-typed or stale edges (e.g., wrong direction). |
 | `list_edges(session_id, from_node?, to_node?, type?)` | List edges with optional filters (AND'd). |
 | `export_mermaid(session_id, root_id?)` | Render as Mermaid `graph TD` text. |
 | `export_yaml(session_id, root_id?)` | JSON-formatted YAML dump (json.loads round-trippable). |
@@ -545,18 +546,23 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 
 ## Edge type vocabulary
 
+`add_edge` rejects types outside this table and rejects self-loops (`from == to`). Use `delete_edge(session_id, edge_id)` to clean up an edge added in error.
+
 | Type | Direction (from → to) | Use |
 |---|---|---|
 | `derived_from` | derived → source | Decision/evidence derived from earlier node (e.g., `decision → hypothesis`) |
+| `requires` | requirer → required | Hard dependency relation (distinct from `blocks` which is phase-ordering) |
 | `supports` | supporter → supported | Evidence supports a decision/hypothesis |
 | `contradicts` | contradictor → contradicted | Observation contradicts a decision/hypothesis |
 | `qualifies` | qualifier → qualified | Finding limits or scopes a target without overturning it |
 | `invalidates` | invalidator → invalidated | Finding shows target's premise no longer holds |
-| `blocks` | blocker → blocked | Dependency: blocker must close before blocked can proceed |
+| `blocks` | blocker → blocked | Phase ordering: blocker must close before blocked can proceed (`list_unblocked_open_nodes` reads this) |
 | `contributes_to` | contributor → End | Explicit semantic justification anchor for an End node |
 | `supersedes` | new → old | New subgraph supersedes an older one (monotonic forward-only) |
 
 **Direction rule**: from-side is the "active" side (supporting, contradicting, deriving); to-side is the target.
+
+**Extending the vocabulary** is a deliberate spec change — propose a new type with use case and direction rule in an issue rather than introducing it ad-hoc. Free-form types would fragment cross-session semantics (e.g., `find_similar` retrieval, `list_unblocked_open_nodes` queries).
 
 ---
 

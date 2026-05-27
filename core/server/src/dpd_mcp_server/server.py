@@ -391,8 +391,11 @@ async def list_tools() -> list[types.Tool]:
             name="add_edge",
             title="Add edge",
             description=(
-                "Insert an edge between two nodes (e.g., requires/blocks/derived_from). "
-                "Edge type vocabulary is free-form for now (no DB-level CHECK)."
+                "Insert an edge between two nodes. Edge type is restricted to "
+                "the canonical vocabulary (derived_from, requires, blocks, "
+                "supports, contradicts, contributes_to, supersedes, qualifies, "
+                "invalidates). Self-loops (from_node == to_node) are rejected. "
+                "Use delete_edge to remove a mis-typed or stale edge."
             ),
             inputSchema={
                 "type": "object",
@@ -401,8 +404,36 @@ async def list_tools() -> list[types.Tool]:
                     "session_id": {"type": "string"},
                     "from_node": {"type": "string"},
                     "to_node": {"type": "string"},
-                    "type": {"type": "string"},
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "derived_from", "requires", "blocks", "supports",
+                            "contradicts", "contributes_to", "supersedes",
+                            "qualifies", "invalidates",
+                        ],
+                    },
                     "reason": {"type": ["string", "null"]},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="delete_edge",
+            title="Delete edge",
+            description=(
+                "Delete a single edge by id within the session. Use to clean "
+                "up edges added in error (typo, mis-direction). Raises if "
+                "edge_id is not found in the session."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "edge_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "edge_id": {"type": "integer"},
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
@@ -966,6 +997,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.list_open_nodes(storage=storage, arguments=tool_args)
     if name == "add_edge":
         return tools.add_edge(storage=storage, arguments=tool_args, now=now)
+    if name == "delete_edge":
+        return tools.delete_edge(storage=storage, arguments=tool_args, now=now)
     if name == "list_edges":
         return tools.list_edges(storage=storage, arguments=tool_args)
     if name == "list_unblocked_open_nodes":

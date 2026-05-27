@@ -117,6 +117,35 @@ def test_find_similar_tool_schema_declares_agent_scope() -> None:
     assert "agent_scope" not in tool.inputSchema.get("required", [])
 
 
+def test_delete_edge_in_tool_registry() -> None:
+    """Issue #10: delete_edge tool must be advertised with edge_id schema."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+    tools = asyncio.run(list_tools())
+    names = {t.name for t in tools}
+    assert "delete_edge" in names
+
+    tool = next(t for t in tools if t.name == "delete_edge")
+    assert "session_id" in tool.inputSchema["properties"]
+    assert "edge_id" in tool.inputSchema["properties"]
+    assert tool.inputSchema["properties"]["edge_id"]["type"] == "integer"
+    assert set(tool.inputSchema["required"]) == {"session_id", "edge_id"}
+
+
+def test_add_edge_schema_enumerates_canonical_types() -> None:
+    """Issue #10: add_edge schema must restrict type to the canonical vocabulary."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+    tools = asyncio.run(list_tools())
+    tool = next(t for t in tools if t.name == "add_edge")
+    enum = tool.inputSchema["properties"]["type"].get("enum")
+    assert enum is not None
+    assert set(enum) == {
+        "derived_from", "requires", "blocks", "supports", "contradicts",
+        "contributes_to", "supersedes", "qualifies", "invalidates",
+    }
+
+
 def test_find_similar_dispatched_by_call_tool(tmp_path, monkeypatch) -> None:
     """call_tool routes name='find_similar' to tools.find_similar."""
     import asyncio
