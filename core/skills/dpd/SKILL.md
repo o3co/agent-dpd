@@ -415,6 +415,29 @@ If resuming and `focus_node` points to `state='closed'` subgraph, do NOT suggest
 
 On `mark_reached` confirmation: call `set_session_mode(session_id, 'idle')` after Pool disposition is complete (§5.2).
 
+#### §5.1.3 Canonical subgraph layout (required for `mark_reached`)
+
+`mark_reached` verifies Start→End connectivity by walking the **`parent_id` chain upward** from End. End must therefore live in Start's `parent_id` descendant subtree. Typed edges (`contributes_to`, `derived_from`, …) do **not** satisfy reachability — only `parent_id` ancestry does.
+
+```text
+root → Start (parent_id=root)
+         ├─ work_nodes (parent_id=Start or descendant)
+         └─ End (parent_id=Start or any Start-descendant, paired_for=Start)
+```
+
+Anti-pattern (will fail with "not reachable" error):
+
+```text
+root
+  ├─ Start (parent_id=root)         ← sibling
+  └─ End   (parent_id=root)         ← sibling  ❌
+       └─ work_nodes
+```
+
+Why parent_id only: the subgraph that `mark_reached` archives is defined by parent_id descendants of Start. Accepting edge paths would close Start+End without archiving work nodes parented under End. Edges remain valuable for semantic justification (`contributes_to`) and phase ordering (`blocks`); they just aren't subgraph-membership signals.
+
+When the empty-context skeleton (§3.2 / Edge cases) creates Start + End, add **End with `parent_id=<start_id>`** explicitly. If End ends up in the wrong place, the recovery is `force_delete(end_id)` then re-add under the correct parent.
+
 ### §5.2 Pool disposition on mark_reached
 
 **Ask the user — never auto-drop.** Present three options for each remaining Pool item:
@@ -433,7 +456,7 @@ The supersedes path for option (i) preserves state machine monotonicity (`active
 
 **Empty-context invocation (§2.1):**
 1. Interpret `/dpd <argument>` as goal hint → present candidate → confirm (§3.2 flow).
-2. On goal confirmed: `spawn_root` → `add_node(type='start')` + `add_node(type='end', paired_for=start_id, achievement_conditions=<goal text>)`.
+2. On goal confirmed: `spawn_root` → `add_node(type='start', parent_id=root_id)` + `add_node(type='end', parent_id=start_id, paired_for=start_id, achievement_conditions=<goal text>)`. End must be under Start in the parent_id chain — see §5.1.3.
 3. Call `set_session_mode(session_id, 'ambient')` on §3.5 explicit OK.
 4. Subsequent signals: all Pool direct, or as children of the skeleton depending on §4.2 attachment criterion.
 

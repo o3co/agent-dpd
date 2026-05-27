@@ -2019,6 +2019,35 @@ def test_mark_reached_rejects_unreachable_end(tmp_db_path: str) -> None:
                              now="2026-05-22T01:00:00Z")
 
 
+def test_mark_reached_unreachable_error_suggests_canonical_layout(
+    tmp_db_path: str,
+) -> None:
+    """When end is not under start in the parent_id chain, the error must
+    guide the user to the canonical layout (re-parent end under start)."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_root(root_id="r1", session_id="ses_1", topic="t",
+                        now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_s", session_id="ses_1", node_type="start",
+                           text="s", parent_id="r1",
+                           paired_for=None, achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    storage.insert_node_v3(node_id="n_e", session_id="ses_1", node_type="end",
+                           text="e", parent_id="r1",
+                           paired_for="n_s",
+                           achievement_conditions=None,
+                           now="2026-05-22T00:00:00Z")
+    import pytest
+    with pytest.raises(ValueError) as excinfo:
+        storage.mark_reached(session_id="ses_1", end_node_id="n_e",
+                             now="2026-05-22T01:00:00Z")
+    msg = str(excinfo.value)
+    assert "n_e" in msg and "n_s" in msg
+    assert "parent_id" in msg
+    assert "canonical layout" in msg.lower() or "re-parent" in msg.lower()
+
+
 def test_dump_persist_transitions_closed_to_deletable(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     storage.insert_session(session_id="ses_1", scope=None, label=None,
