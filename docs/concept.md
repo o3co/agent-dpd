@@ -98,11 +98,13 @@ When the v0.3.1 spec draft was almost done, we ran it through this three-step pi
        Each inferred node is marked provenance='inferred' and requires
        explicit opt-in to keep.
 
-/fcot
-    └─ runs Falsification Chain-of-Thought over each inferred node,
-       attempting to *disprove* it from the existing graph + the spec text.
+/fcot  (opt-in; automatic only on high-stakes inferred nodes)
+    └─ runs Falsification Chain-of-Thought over a node, attempting to
+       *disprove* it from the existing graph + the spec text.
        Verdicts: confirmed / falsified / unable_to_decide.
 ```
+
+`/fcot` runs automatically on high-stakes inferred nodes produced by `/dpd-fill` and `/dpd-import`; on low-stakes nodes it is optional — invoke when you want extra rigor on a specific node, skip when the cost of a wrong inferred node is low. Over-verification breaks the ambient overlay philosophy (`docs/spec` §10).
 
 `/fcot` is what catches the over-eager `/dpd-fill`. In our run, 4 of 6 high-confidence inferred nodes were falsified — they sounded plausible but the spec already covered them. The remaining 2 were real gaps:
 
@@ -120,7 +122,7 @@ Other artifacts from the loop:
 - The "End modification gate" was added *after* a self-validation run surfaced cases where the agent had silently expanded an End to fit work that had already drifted past it.
 - Several self-check rules (e.g., "before flattening N≥3 concerns into one node, consider a sub-tree") were derived from observing the agent's own failure modes during development sessions.
 
-You can run the same pipeline on your own specs or design documents — `/dpd-import → /dpd-fill → /fcot` is the documented pattern for systematic gap analysis.
+You can run the same pipeline on your own specs or design documents. `/dpd-import → /dpd-fill → /fcot` is a documented pattern for systematic gap analysis; `/fcot` is automatic on high-stakes inferred nodes and optional on the rest, so the third step's cost scales with how rigorous you need to be.
 
 ---
 
