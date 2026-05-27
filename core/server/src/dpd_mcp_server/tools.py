@@ -432,8 +432,12 @@ def resolve_branch(
 _MERMAID_MAX_LABEL = 60
 
 
-def _sanitize_for_mermaid(text: str) -> str:
-    """Strip characters that would confuse Mermaid's label/edge syntax."""
+def _sanitize_for_mermaid(text: str, max_label_chars: int | None = _MERMAID_MAX_LABEL) -> str:
+    """Strip characters that would confuse Mermaid's label/edge syntax.
+
+    ``max_label_chars`` caps label length (inclusive of trailing ellipsis).
+    Pass ``None`` to disable truncation entirely (full text in the label).
+    """
     sanitized = (
         text.replace("\\", "/")
         .replace('"', "'")
@@ -441,8 +445,8 @@ def _sanitize_for_mermaid(text: str) -> str:
         .replace("\n", " ")
         .replace("\r", " ")
     )
-    if len(sanitized) > _MERMAID_MAX_LABEL:
-        sanitized = sanitized[: _MERMAID_MAX_LABEL - 1] + "…"
+    if max_label_chars is not None and len(sanitized) > max_label_chars:
+        sanitized = sanitized[: max_label_chars - 1] + "…"
     return sanitized
 
 
@@ -461,6 +465,10 @@ def export_mermaid(
     """
     session_id = _required(arguments, "session_id")
     root_id_filter = arguments.get("root_id") or None
+    if "max_label_chars" in arguments:
+        max_label_chars = arguments["max_label_chars"]
+    else:
+        max_label_chars = _MERMAID_MAX_LABEL
 
     if root_id_filter is not None:
         root_row = storage.get_root(
@@ -481,7 +489,7 @@ def export_mermaid(
     for root in roots:
         root_id = root["id"]
         rendered_ids.add(root_id)
-        topic = _sanitize_for_mermaid(root["topic"])
+        topic = _sanitize_for_mermaid(root["topic"], max_label_chars)
         lines.append(f'    {root_id}["root: {topic}"]')
 
         subtree = storage.walk_subtree(session_id=session_id, root_id=root_id)
@@ -489,18 +497,20 @@ def export_mermaid(
             nid = node["id"]
             rendered_ids.add(nid)
             ntype = node["type"]
-            text = _sanitize_for_mermaid(node["text"])
+            text = _sanitize_for_mermaid(node["text"], max_label_chars)
             lines.append(f'    {nid}["{ntype}: {text}"]')
             lines.append(f"    {node['parent_id']} --> {nid}")
             if node["status"] == "closed":
                 reason = node["closure_reason"] or "resolved"
                 class_assignments.append(f"    class {nid} closed_{reason}")
 
-    # Non-tree edges (only between rendered nodes)
+    # Non-tree edges (only between rendered nodes). Edge type labels are
+    # always rendered in full — they belong to the small canonical vocab
+    # so truncation would only obscure semantics.
     all_edges = storage.list_edges(session_id=session_id)
     for edge in all_edges:
         if edge["from_node"] in rendered_ids and edge["to_node"] in rendered_ids:
-            etype = _sanitize_for_mermaid(edge["type"])
+            etype = _sanitize_for_mermaid(edge["type"], None)
             lines.append(
                 f"    {edge['from_node']} -.{etype}.-> {edge['to_node']}"
             )

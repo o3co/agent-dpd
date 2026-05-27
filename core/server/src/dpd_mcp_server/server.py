@@ -516,6 +516,16 @@ async def list_tools() -> list[types.Tool]:
                         "type": ["string", "null"],
                         "description": "If given, restrict export to this root's subtree.",
                     },
+                    "max_label_chars": {
+                        "type": ["integer", "null"],
+                        "default": 60,
+                        "description": (
+                            "Maximum node-label length (inclusive of trailing "
+                            "ellipsis). Pass null to disable truncation — use "
+                            "for README/docs embeds where full labels matter. "
+                            "Default 60 keeps large graphs visually balanced."
+                        ),
+                    },
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",

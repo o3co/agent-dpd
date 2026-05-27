@@ -513,7 +513,7 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `add_edge(session_id, from_node, to_node, type, reason?)` | Insert an edge between nodes. `type` is enforced against the canonical vocabulary (see Edge type table below). Self-loops rejected. |
 | `delete_edge(session_id, edge_id)` | Delete a single edge by id. Use to clean up mis-typed or stale edges (e.g., wrong direction). |
 | `list_edges(session_id, from_node?, to_node?, type?)` | List edges with optional filters (AND'd). |
-| `export_mermaid(session_id, root_id?)` | Render as Mermaid `graph TD` text. |
+| `export_mermaid(session_id, root_id?, max_label_chars?)` | Render as Mermaid `graph TD` text. `max_label_chars` caps node label length (default 60, ellipsis on overflow). Pass `null` to disable truncation — use when embedding in README/docs where full labels matter. |
 | `export_yaml(session_id, root_id?)` | JSON-formatted YAML dump (json.loads round-trippable). |
 | `get_node(session_id, node_id)` | Fetch single node. |
 | `walk_subtree(session_id, root_id)` | All descendants of root (pre-order). |
