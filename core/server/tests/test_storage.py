@@ -1830,7 +1830,7 @@ def test_storage_open_migrates_v2_to_v3_schema(tmp_db_path: str) -> None:
         assert col in node_cols, f"missing nodes.{col}"
     for col in ("scope", "scope_root", "migrated_to_start_id"):
         assert col in root_cols, f"missing roots.{col}"
-    assert version == 5, f"user_version should be 5, got {version}"
+    assert version == 6, f"user_version should be 6, got {version}"
 
 
 def test_storage_open_migrates_v3_to_v4_schema(tmp_db_path: str) -> None:
@@ -1906,7 +1906,7 @@ def test_storage_open_migrates_v3_to_v4_schema(tmp_db_path: str) -> None:
         )
 
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 5, f"expected user_version=5 after migration, got {version}"
+        assert version == 6, f"expected user_version=6 after migration, got {version}"
 
 
 def test_v3_scope_root_requires_non_null_scope(tmp_db_path: str) -> None:
@@ -2284,6 +2284,40 @@ def test_force_purge_session_cascades_active_session(tmp_db_path: str) -> None:
     assert storage.list_edges(session_id="ses_f") == []
 
 
+def test_insert_node_v3_persists_severity(tmp_db_path: str) -> None:
+    """Issue #32: question (or any) node can carry an optional severity field."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_sev", scope=None, label=None,
+                           now="2026-05-27T00:00:00Z")
+    storage.insert_root(root_id="r_sev", session_id="ses_sev", topic="t",
+                        now="2026-05-27T00:00:00Z")
+    storage.insert_node_v3(
+        node_id="q1", session_id="ses_sev", node_type="question",
+        text="threshold differs from prior spec", parent_id="r_sev",
+        paired_for=None, achievement_conditions=None,
+        severity="surface",
+        now="2026-05-27T00:01:00Z",
+    )
+    row = storage.get_node(session_id="ses_sev", node_id="q1")
+    assert row["severity"] == "surface"
+
+
+def test_insert_node_v3_severity_defaults_to_null(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_sn", scope=None, label=None,
+                           now="2026-05-27T00:00:00Z")
+    storage.insert_root(root_id="r_sn", session_id="ses_sn", topic="t",
+                        now="2026-05-27T00:00:00Z")
+    storage.insert_node_v3(
+        node_id="q2", session_id="ses_sn", node_type="question",
+        text="plain question", parent_id="r_sn",
+        paired_for=None, achievement_conditions=None,
+        now="2026-05-27T00:01:00Z",
+    )
+    row = storage.get_node(session_id="ses_sn", node_id="q2")
+    assert row["severity"] is None
+
+
 def test_get_or_create_scope_root_top_level_uses_empty_string_sentinel(tmp_db_path: str) -> None:
     """scope=None should be normalized to empty-string sentinel internally."""
     storage = Storage.open(tmp_db_path)
@@ -2551,7 +2585,7 @@ def test_v4_user_version_is_4(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     with storage.connect() as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 5
+    assert version == 6
 
 
 def test_v4_pool_rejected_index_exists(tmp_db_path: str) -> None:
@@ -2625,7 +2659,7 @@ def test_storage_open_migrates_v2_to_v4_schema(tmp_db_path: str) -> None:
         )
 
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 5, f"expected user_version=5 after v2→v5 migration, got {version}"
+        assert version == 6, f"expected user_version=6 after v2→v6 migration, got {version}"
 
 
 def test_open_creates_subgraphs_fts_virtual_table(tmp_db_path: str) -> None:
@@ -2645,7 +2679,7 @@ def test_open_bumps_user_version_to_5(tmp_db_path: str) -> None:
     Storage.open(tmp_db_path)
     with sqlite3.connect(tmp_db_path) as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 5
+    assert version == 6
 
 
 def test_subgraphs_fts_uses_trigram_tokenizer(tmp_db_path: str) -> None:
@@ -2658,7 +2692,7 @@ def test_subgraphs_fts_uses_trigram_tokenizer(tmp_db_path: str) -> None:
 
 
 def test_open_chains_v3_v4_v5_migrations(tmp_db_path: str) -> None:
-    """A genuine v3 DB should arrive at user_version=5 via the chain."""
+    """A genuine v3 DB should arrive at user_version=6 via the chain."""
     import sqlite3
     with sqlite3.connect(tmp_db_path) as conn:
         conn.executescript("""
@@ -2703,7 +2737,7 @@ def test_open_chains_v3_v4_v5_migrations(tmp_db_path: str) -> None:
         names = {row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         )}
-    assert version == 5
+    assert version == 6
     assert "subgraphs_fts" in names
 
 
@@ -2738,5 +2772,5 @@ def test_open_v4_db_runs_v4_to_v5_backfill(tmp_db_path: str) -> None:
         anchor = conn.execute(
             "SELECT anchor_text FROM subgraphs_fts WHERE start_node_id = 'ns'"
         ).fetchone()
-    assert version == 5
+    assert version == 6
     assert anchor is not None and "OPEN-AGAIN" in anchor[0]

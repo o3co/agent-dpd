@@ -26,10 +26,12 @@ class Storage:
         Migration chain on pre-existing databases:
           - user_version = 2: run _migrate_v2_to_v3 (structural rebuild),
             then migrate_v3_to_v4 (ALTER TABLE + partial index),
-            then migrate_v4_to_v5 (FTS table + backfill).
-          - user_version = 3: run migrate_v3_to_v4 then migrate_v4_to_v5.
-          - user_version = 4: run migrate_v4_to_v5 only.
-          - user_version >= 5: no migration needed; schema.sql is applied
+            then migrate_v4_to_v5 (FTS table + backfill),
+            then migrate_v5_to_v6 (ALTER TABLE: nodes.severity).
+          - user_version = 3: run v3→v4, v4→v5, v5→v6.
+          - user_version = 4: run v4→v5, v5→v6.
+          - user_version = 5: run v5→v6 only.
+          - user_version >= 6: no migration needed; schema.sql is applied
             (CREATE TABLE IF NOT EXISTS is idempotent).
 
         SQLite limitation: ALTER TABLE cannot add CHECK constraints, so the
@@ -39,6 +41,7 @@ class Storage:
         """
         from .migrate_v3_to_v4 import migrate as _migrate_v3_to_v4
         from .migrate_v4_to_v5 import migrate as _migrate_v4_to_v5
+        from .migrate_v5_to_v6 import migrate as _migrate_v5_to_v6
 
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -76,11 +79,16 @@ class Storage:
                 """)
             _migrate_v3_to_v4(db_path=db_path)
             _migrate_v4_to_v5(db_path=db_path)
+            _migrate_v5_to_v6(db_path=db_path)
         elif pre_schema_version == 3:
             _migrate_v3_to_v4(db_path=db_path)
             _migrate_v4_to_v5(db_path=db_path)
+            _migrate_v5_to_v6(db_path=db_path)
         elif pre_schema_version == 4:
             _migrate_v4_to_v5(db_path=db_path)
+            _migrate_v5_to_v6(db_path=db_path)
+        elif pre_schema_version == 5:
+            _migrate_v5_to_v6(db_path=db_path)
 
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
@@ -1494,8 +1502,9 @@ class Storage:
         now: str,
         provenance: str = "grounded",
         state: str = "active",
+        severity: str | None = None,
     ) -> None:
-        """v3 node insert: supports paired_for + achievement_conditions + provenance + state.
+        """v3 node insert: supports paired_for + achievement_conditions + provenance + state + severity.
 
         End nodes must specify paired_for (= the Start node they terminate).
 
@@ -1503,6 +1512,11 @@ class Storage:
         between the lookup and the insert cannot create an orphan node row.
         parent_kind is derived internally by querying roots then nodes within
         the same transaction — callers must not pass it.
+
+        ``severity`` is optional proposer-assigned classification (e.g.
+        'logical' / 'surface' / 'cosmetic' on question nodes) used by §4.5
+        to group natural-pause proposals. Free-form string; no DB-level
+        CHECK so the vocabulary can extend without migration.
 
         Raises ValueError if parent_id is not found in either roots or nodes.
         provenance and state are validated by DB CHECK constraints; invalid
@@ -1532,15 +1546,16 @@ class Storage:
                      parent_id, parent_kind,
                      paired_for, achievement_conditions,
                      achievement_conditions_satisfied, state, provenance,
+                     severity,
                      archived_at, closed_at, deletable_at,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?, 0, ?, ?,
+                VALUES (?, ?, ?, ?, 'open', NULL, ?, ?, ?, ?, 0, ?, ?, ?,
                         NULL, NULL, NULL, ?, ?)
                 """,
                 (node_id, session_id, node_type, text,
                  parent_id, parent_kind,
                  paired_for, achievement_conditions,
-                 state, provenance,
+                 state, provenance, severity,
                  now, now),
             )
             self._touch_session(conn, session_id=session_id, now=now)

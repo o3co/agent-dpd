@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS nodes (
         CHECK (achievement_conditions_satisfied IN (0,1)),
     state           TEXT NOT NULL DEFAULT 'active'
         CHECK (state IN ('active','archived','closed','deletable','gone')),
+    severity        TEXT,                                     -- v6: optional proposer-assigned severity (logical/surface/cosmetic or extended)
     archived_at     TEXT,
     closed_at       TEXT,
     deletable_at    TEXT,
@@ -120,4 +121,4 @@ CREATE VIRTUAL TABLE IF NOT EXISTS subgraphs_fts USING fts5(
     tokenize = 'trigram'
 );
 
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;
