@@ -1101,6 +1101,75 @@ def test_delete_edge_cascades_verifications(tmp_db_path: str) -> None:
         session_id="ses_1", edge_id=edge_id) == []
 
 
+def test_record_edge_verification_does_not_mutate_edge(tmp_db_path: str) -> None:
+    """#42 invariant: a verdict (esp. 'refuted') NEVER auto-mutates the edge.
+    Recording only appends to edge_verifications; the edge's layer/priority
+    are untouched. Downgrade is a separate, explicit set_edge_layer call."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary", verification_priority="critical",
+    )
+    storage.record_edge_verification(
+        session_id="ses_1", edge_id=edge_id,
+        verified_by="codex", method="external:codex", verdict="refuted",
+        notes="counterexample found", prompt_hash=None,
+        now="2026-05-20T12:00:00Z",
+    )
+    row = storage.list_edges(session_id="ses_1")[0]
+    assert row["layer"] == "necessary"
+    assert row["verification_priority"] == "critical"
+
+
+def test_record_edge_verification_is_append_only(tmp_db_path: str) -> None:
+    """#42: re-verification appends rows (1:many history), oldest first —
+    it does not overwrite the previous record."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary",
+    )
+    v1 = storage.record_edge_verification(
+        session_id="ses_1", edge_id=edge_id,
+        verified_by="codex", method="external:codex", verdict="refuted",
+        notes=None, prompt_hash=None, now="2026-05-20T12:00:00Z",
+    )
+    v2 = storage.record_edge_verification(
+        session_id="ses_1", edge_id=edge_id,
+        verified_by="claude", method="external:claude", verdict="holds",
+        notes=None, prompt_hash=None, now="2026-05-20T13:00:00Z",
+    )
+    rows = storage.list_edge_verifications(session_id="ses_1", edge_id=edge_id)
+    assert [r["id"] for r in rows] == [v1, v2]
+    assert [r["verdict"] for r in rows] == ["refuted", "holds"]
+
+
+def test_record_edge_verification_accepts_holds_with_caveat(
+    tmp_db_path: str,
+) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary",
+    )
+    storage.record_edge_verification(
+        session_id="ses_1", edge_id=edge_id,
+        verified_by="codex", method="external:codex",
+        verdict="holds-with-caveat", notes="holds only if X is total",
+        prompt_hash=None, now="2026-05-20T12:00:00Z",
+    )
+    row = storage.list_edge_verifications(
+        session_id="ses_1", edge_id=edge_id)[0]
+    assert row["verdict"] == "holds-with-caveat"
+    assert row["notes"] == "holds only if X is total"
+
+
 def _seed_three_endpoints(storage: Storage) -> None:
     _seed_two_endpoints(storage)
     storage.insert_node(
