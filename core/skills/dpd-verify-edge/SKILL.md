@@ -69,7 +69,7 @@ Parse the reply's first line: `VERDICT:` then one of `holds` / `holds-with-cavea
 
 ## Step 5 — Record + act on the verdict
 
-Always: `record_edge_verification(session_id, edge_id, verified_by, method, verdict, notes, prompt_hash)`. Append-only — re-verification adds a row, preserving history. Compute `prompt_hash` from the rendered Step-2 prompt (drift audit).
+Always: `record_edge_verification(session_id, edge_id, verdict, verified_by?, method?, notes?, prompt_hash?)` — `verdict` is required and comes right after `edge_id`; the rest are optional. Append-only — re-verification adds a row, preserving history. Compute `prompt_hash` from the rendered Step-2 prompt (drift audit).
 
 Then, by verdict — **propose, never auto-mutate the graph's epistemic structure**:
 
