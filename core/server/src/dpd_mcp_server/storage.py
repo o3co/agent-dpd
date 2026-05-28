@@ -756,6 +756,13 @@ class Storage:
         invalid edges carry no obligation. Ordered by verification_priority
         (critical → standard → low → unset), then edge id. Optionally
         restricted to a single priority bucket.
+
+        Note: the queue means "not yet verified", so ANY verdict — including
+        ``refuted`` — drops the edge from this list (it now has a row in
+        edge_verifications). A refuted necessary edge therefore leaves this
+        queue while still tagged ``necessary``; acting on the refutation
+        (downgrade via set_edge_layer) is a separate, explicit step, not
+        driven by this query.
         """
         sql = (
             "SELECT * FROM edges e "

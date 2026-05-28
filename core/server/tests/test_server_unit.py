@@ -228,3 +228,46 @@ def test_find_similar_dispatched_by_call_tool(tmp_path, monkeypatch) -> None:
     ))
     assert result == {"results": []}
     assert captured["arguments"] == {"query": "anything"}
+
+
+def test_record_edge_verification_dispatched_by_call_tool(
+    tmp_path, monkeypatch,
+) -> None:
+    """#42: call_tool routes record_edge_verification (a now-taking tool)."""
+    import asyncio
+    from dpd_mcp_server import server as server_mod
+
+    captured: dict = {}
+
+    def fake_record(*, storage, arguments, now):
+        captured["arguments"] = arguments
+        return {"verification_id": 1}
+
+    monkeypatch.setattr(server_mod.tools, "record_edge_verification", fake_record)
+    monkeypatch.setenv("DPD_DATA_DIR", str(tmp_path))
+    result = asyncio.run(server_mod.call_tool(
+        "record_edge_verification",
+        {"session_id": "s", "edge_id": 1, "verdict": "holds",
+         "agent_scope": "test-scope"},
+    ))
+    assert result == {"verification_id": 1}
+    assert captured["arguments"]["verdict"] == "holds"
+
+
+def test_list_unverified_edges_dispatched_by_call_tool(
+    tmp_path, monkeypatch,
+) -> None:
+    """#42: call_tool routes list_unverified_edges (a read-only tool)."""
+    import asyncio
+    from dpd_mcp_server import server as server_mod
+
+    def fake_list(*, storage, arguments):
+        return {"edges": []}
+
+    monkeypatch.setattr(server_mod.tools, "list_unverified_edges", fake_list)
+    monkeypatch.setenv("DPD_DATA_DIR", str(tmp_path))
+    result = asyncio.run(server_mod.call_tool(
+        "list_unverified_edges",
+        {"session_id": "s", "agent_scope": "test-scope"},
+    ))
+    assert result == {"edges": []}
