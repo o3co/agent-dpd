@@ -596,7 +596,7 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `record_edge_verification(session_id, edge_id, verdict, verified_by?, method?, notes?, prompt_hash?)` | **[v0.6]** Append an external-verification record (`verdict` ∈ `holds`/`holds-with-caveat`/`refuted`). Append-only; `refuted` does NOT auto-downgrade. Produced by `/dpd-verify-edge`. |
 | `list_unverified_edges(session_id, verification_priority?)` | **[v0.6]** Necessary edges with no verification record yet (obligation keyed off `layer='necessary'`), ordered critical→standard→low→unset. |
 | `list_edge_verifications(session_id, edge_id)` | **[v0.6]** All verification records for one edge, oldest first (re-verification history). |
-| `export_yaml(session_id, root_id?)` | JSON-formatted YAML dump (json.loads round-trippable). |
+| `export_yaml(session_id, root_id?)` | JSON dump (a strict subset of YAML; json.loads round-trippable). |
 | `get_node(session_id, node_id)` | Fetch single node. |
 | `walk_subtree(session_id, root_id)` | All descendants of root (pre-order). |
 | `list_active_roots(session_id)` | Roots with lifecycle=active. |
@@ -826,7 +826,7 @@ These skills are planned for Phase 4 and will each have their own SKILL.md:
 | `/dpd-import` | Parse external prose/spec/graph → hypothetical archived DPD subgraph (uses `bulk_import_subgraph`, provenance=`'imported'`, state=`'archived'`) |
 | `/dpd-fill` | Generate inferred nodes + detect missing arguments / gaps (uses `add_node` with provenance=`'inferred'`). Auto-invokes `/fcot` on high-stakes inferred nodes; user-invoked elsewhere. |
 | `/dpd-status` | Current graph + Pool + pending updates view (uses `pool_list(include_rejected=True)` for full visibility) |
-| `/dpd-dump` | Full graph dump as JSON-formatted YAML (wraps `export_yaml`) |
+| `/dpd-dump` | Full graph dump as JSON (YAML-compatible; wraps `export_yaml`) |
 | `/dpd-summary-md` | Export decided/closed items as markdown summary |
 | `/dpd-edit <node\|pool_id>` | Manual node/pool mutation. Also used for unsuppress: clear `rejected_at` / `rejected_reason` on a pool item. |
 | `/dpd-find-similar` | **[v0.3.2]** Retrieval-augmented proposal. User-pull only — Claude may NOT auto-invoke. Returns past closed/archived subgraphs matching a query, then distills selected ones into graph-candidate proposals (no prose lessons). |

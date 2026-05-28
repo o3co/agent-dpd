@@ -1,6 +1,6 @@
 ---
 name: dpd-dump
-description: Dump the full DPD graph as JSON-formatted YAML (json.loads round-trippable) via export_yaml. Use for snapshots, audit, diffing, or copy-paste into docs.
+description: Dump the full DPD graph as JSON (a strict subset of YAML; json.loads round-trippable) via export_yaml. Use for snapshots, audit, diffing, or copy-paste into docs.
 ---
 
 # /dpd-dump
@@ -36,16 +36,16 @@ Announce: "Using dpd-dump skill."
 export_yaml(session_id=<session_id>, root_id=<root_id or omit for all>)
 ```
 
-Returns JSON-formatted YAML (json.loads round-trippable) representing the full graph or subtree — every node and edge, all relationships first-class (no second-class visual rendering).
+Returns JSON text (a strict subset of YAML; json.loads round-trippable) representing the full graph or subtree — every node and edge, all relationships first-class (no second-class visual rendering).
 
 ---
 
 ## Output format
 
-Paste output verbatim in a code fence:
+Paste output verbatim in a code fence (the output is JSON, so label it `json`):
 
 ````
-```yaml
+```json
 <export_yaml output>
 ```
 ````

@@ -36,7 +36,7 @@ Each sub-skill is a directory with its own `SKILL.md`. They are independently in
 | Sub-skill | Purpose |
 | --- | --- |
 | [`dpd-status`](dpd-status/) | Snapshot of current session: active roots, focus node, Pool items (active + rejected), session mode. Answers "where are we?" |
-| [`dpd-dump`](dpd-dump/) | Dump the full DPD graph as JSON-formatted YAML (`export_yaml`, json.loads round-trippable). For audit, snapshots, diffing, or pasting into docs. |
+| [`dpd-dump`](dpd-dump/) | Dump the full DPD graph as JSON (a strict subset of YAML; `export_yaml`, json.loads round-trippable). For audit, snapshots, diffing, or pasting into docs. |
 | [`dpd-summary-md`](dpd-summary-md/) | Extract decided / closed items and render as markdown summary. For session wrap-up or producing spec material from a settled subgraph. |
 | [`dpd-edit`](dpd-edit/) | Manual edit of a node or Pool item — wraps `close_node`, `add_node(provenance='manual')`, `pool_reject`, Pool unsuppress. Used when the user wants direct control beyond ambient mode. |
 | [`dpd-fill`](dpd-fill/) | Generate inferred nodes for the current graph: missing decompositions, unstated assumptions, gap candidates. Each inferred node requires user opt-in. Often paired with `/fcot` for falsification. |

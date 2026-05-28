@@ -19,10 +19,10 @@ later as a new export if needed.
 
 ### BREAKING CHANGES
 
-- **`export_mermaid` MCP tool removed.** Use `export_yaml` (JSON-formatted,
-  `json.loads` round-trippable) for graph dumps. 38 MCP tools total (was 39).
-  The `/dpd-dump` skill is now YAML-only (the `--format=mermaid` option is
-  gone); `--root=<id>` still scopes the dump.
+- **`export_mermaid` MCP tool removed.** Use `export_yaml` (JSON output — a
+  strict subset of YAML; `json.loads` round-trippable) for graph dumps. 38 MCP
+  tools total (was 39). The `/dpd-dump` skill now emits only `export_yaml`
+  (the `--format=mermaid` option is gone); `--root=<id>` still scopes the dump.
 
 ### Changed
 
