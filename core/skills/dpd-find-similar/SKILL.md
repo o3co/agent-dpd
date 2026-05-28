@@ -36,7 +36,7 @@ find_similar(query="<confirmed>", top_k=5, include_open=False)
 
 ## Step 3 — Present results
 
-Render in conversation prose (no Mermaid). Format:
+Render in conversation prose (not a graph diagram). Format:
 
 ```text
 過去類似 subgraph (state=closed/archived):

@@ -137,7 +137,7 @@ DPD: [mark_reached] セッションは idle に。サブグラフを閉じまし
 | --- | --- |
 | `/dpd` | 意思決定の追跡開始、または既存セッションの再開 |
 | `/dpd-status` | 「今どこ?」スナップショット — アクティブなルート、フォーカス、Pool アイテム、モード |
-| `/dpd-dump` | グラフ全体をツリーまたは Mermaid で表示 |
+| `/dpd-dump` | グラフ全体を JSON 形式 YAML で表示 |
 | `/dpd-summary-md` | 決定済み / クローズ済みアイテムを markdown サマリで抽出 |
 | `/dpd-edit <id>` | 直接制御したい時の手動編集 |
 | `/dpd-import <file>` | 散文 / 仕様 / グラフ文書をアーカイブ済みサブグラフとして取り込み |
@@ -154,7 +154,7 @@ DPD: [mark_reached] セッションは idle に。サブグラフを閉じまし
 
 ### 詳細な使用例
 
-実際に MCP ツールで graph を組んだ walkthrough (transcript + Mermaid 込み) を [`docs/examples.md`](docs/examples.md) (英語のみ) に集約しています。「こんな時に使います」の各ケースに対応:
+実際に MCP ツールで graph を組んだ walkthrough (transcript + YAML export 込み) を [`docs/examples.md`](docs/examples.md) (英語のみ) に集約しています。「こんな時に使います」の各ケースに対応:
 
 1. **マネタイズモデルを落とし込む** — 複数仮説 → evidence → 採用 + 却下案も根拠付きで保存
 2. **もやっとしたサービスを最小スペックに narrowing** — End 絞り込みで「アプリ作りたい」を具体的な初版 spec (target / interaction / non-goals) まで落とす

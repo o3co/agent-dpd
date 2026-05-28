@@ -221,9 +221,9 @@ Confidently classifiable observations → graph nodes. Ambiguous observations �
 
 ### §3.4 Proposal format: C + minimal B
 
-Primary: **Mermaid graph** (visual + spatial). Accompany with **minimal classification notes** — one line per node/group explaining Claude's categorization decision (e.g., "これは decided として graph 化", "これは open Q").
+Primary: a **hierarchical text outline** of the proposed structure (parent → child indentation, edges noted inline as `[→ type from→to]`). Accompany with **minimal classification notes** — one line per node/group explaining Claude's categorization decision (e.g., "これは decided として graph 化", "これは open Q").
 
-Rationale: Mermaid alone risks Claude deciding structure too early. Notes alone leave classification work to the user. C + minimal B shows the graph while surfacing the reasoning.
+Rationale: structure alone risks Claude deciding structure too early. Notes alone leave classification work to the user. C + minimal B shows the shape while surfacing the reasoning. (The outline mirrors the §4.5 ambient proposal format; the authoritative machine-readable graph is always `export_yaml`.)
 
 ### §3.5 Explicit transition to ambient mode
 
@@ -335,7 +335,7 @@ root_abc (TBD 4)
 これを適用してよいですか?
 ```
 
-Rationale: Full Mermaid at every pause is expensive. Numbered lists lose spatial context. Hierarchical list gives both spatial anchoring and text clarity.
+Rationale: a full graph dump at every pause is expensive. Numbered lists lose spatial context. Hierarchical list gives both spatial anchoring and text clarity.
 
 #### §4.5.1 Severity-aware grouping (questions / cross-doc review) [v0.4]
 
@@ -596,7 +596,6 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `record_edge_verification(session_id, edge_id, verdict, verified_by?, method?, notes?, prompt_hash?)` | **[v0.6]** Append an external-verification record (`verdict` ∈ `holds`/`holds-with-caveat`/`refuted`). Append-only; `refuted` does NOT auto-downgrade. Produced by `/dpd-verify-edge`. |
 | `list_unverified_edges(session_id, verification_priority?)` | **[v0.6]** Necessary edges with no verification record yet (obligation keyed off `layer='necessary'`), ordered critical→standard→low→unset. |
 | `list_edge_verifications(session_id, edge_id)` | **[v0.6]** All verification records for one edge, oldest first (re-verification history). |
-| `export_mermaid(session_id, root_id?, max_label_chars?)` | Render as Mermaid `graph TD` text. `max_label_chars` caps node label length (default 60, ellipsis on overflow). Pass `null` to disable truncation — use when embedding in README/docs where full labels matter. |
 | `export_yaml(session_id, root_id?)` | JSON-formatted YAML dump (json.loads round-trippable). |
 | `get_node(session_id, node_id)` | Fetch single node. |
 | `walk_subtree(session_id, root_id)` | All descendants of root (pre-order). |
@@ -827,7 +826,7 @@ These skills are planned for Phase 4 and will each have their own SKILL.md:
 | `/dpd-import` | Parse external prose/spec/graph → hypothetical archived DPD subgraph (uses `bulk_import_subgraph`, provenance=`'imported'`, state=`'archived'`) |
 | `/dpd-fill` | Generate inferred nodes + detect missing arguments / gaps (uses `add_node` with provenance=`'inferred'`). Auto-invokes `/fcot` on high-stakes inferred nodes; user-invoked elsewhere. |
 | `/dpd-status` | Current graph + Pool + pending updates view (uses `pool_list(include_rejected=True)` for full visibility) |
-| `/dpd-dump` | Full graph tree textual dump (wraps `export_yaml` / `export_mermaid`) |
+| `/dpd-dump` | Full graph dump as JSON-formatted YAML (wraps `export_yaml`) |
 | `/dpd-summary-md` | Export decided/closed items as markdown summary |
 | `/dpd-edit <node\|pool_id>` | Manual node/pool mutation. Also used for unsuppress: clear `rejected_at` / `rejected_reason` on a pool item. |
 | `/dpd-find-similar` | **[v0.3.2]** Retrieval-augmented proposal. User-pull only — Claude may NOT auto-invoke. Returns past closed/archived subgraphs matching a query, then distills selected ones into graph-candidate proposals (no prose lessons). |

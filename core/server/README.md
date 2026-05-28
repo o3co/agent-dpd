@@ -121,7 +121,6 @@ Restart Claude Code so the `mcp__dpd-mcp-server__*` tools are discoverable.
 | Tool | Purpose |
 | --- | --- |
 | `bulk_import_subgraph` | Insert a whole subgraph (nodes + edges) in one transaction, with parent_kind consistency validation. |
-| `export_mermaid` | Render a subgraph (or active roots) as Mermaid. |
 | `export_yaml` | Render a subgraph as JSON-compatible YAML. |
 | `dump_persist` | Dump session state to a stable on-disk format. |
 

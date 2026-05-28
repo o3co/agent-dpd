@@ -121,7 +121,6 @@ claude mcp add dpd-mcp-server -- "$(pwd)/mcp/.venv/bin/dpd-mcp-server"
 | Tool | 役割 |
 | --- | --- |
 | `bulk_import_subgraph` | subgraph (nodes + edges) を 1 transaction で挿入、parent_kind の整合検証付き。 |
-| `export_mermaid` | subgraph (または active roots) を Mermaid として render。 |
 | `export_yaml` | subgraph を JSON 互換 YAML として render。 |
 | `dump_persist` | session 状態を安定 on-disk 形式に dump。 |
 

@@ -38,7 +38,7 @@ If the user wants to attach graph context for a bug report, the skill MUST ask t
 
 **Tool-call policy (allow-list, NOT deny-list):**
 
-The skill MUST NOT call ANY `mcp__dpd-mcp-server__*` tool for the purpose of composing the feedback body. This is a categorical prohibition — every DPD MCP tool is forbidden in this skill's scope, including but not limited to `export_mermaid`, `export_yaml`, `get_node`, `get_session_state`, `walk_subtree`, `list_open_nodes`, `list_active_roots`, `list_sessions`, `list_edges`, `find_similar`, `pool_list`, `dump_persist`. The enumeration is illustrative; the rule is the categorical one.
+The skill MUST NOT call ANY `mcp__dpd-mcp-server__*` tool for the purpose of composing the feedback body. This is a categorical prohibition — every DPD MCP tool is forbidden in this skill's scope, including but not limited to `export_yaml`, `get_node`, `get_session_state`, `walk_subtree`, `list_open_nodes`, `list_active_roots`, `list_sessions`, `list_edges`, `find_similar`, `pool_list`, `dump_persist`. The enumeration is illustrative; the rule is the categorical one.
 
 The only data sources allowed for the feedback body are:
 1. The user's free-text input (the `<short description>` argument and follow-ups)
@@ -177,7 +177,7 @@ After successful submission, print the issue URL once and stop. Do NOT add the s
 
 ## Edge cases
 
-- **User wants to include graph context**: ask them to paste the specific Mermaid / YAML / quoted node text into the description themselves. Do not call DPD MCP tools for export.
+- **User wants to include graph context**: ask them to paste the specific YAML / quoted node text into the description themselves. Do not call DPD MCP tools for export.
 - **User provides multi-line description with sensitive looking text**: do NOT auto-redact, but do warn before submit if the description appears to include path names / API keys / etc.
 - **gh CLI missing**: print manual submission command.
 - **Network failure**: print body to stdout, prompt user to copy-paste into a new GitHub issue manually.
