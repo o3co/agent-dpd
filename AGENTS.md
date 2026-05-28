@@ -43,7 +43,7 @@ Or to install permanently:
 /plugin install dpd@agent-dpd
 ```
 
-The plugin lays out `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (read-only on update; e.g. `~/.claude/plugins/cache/agent-dpd/dpd/0.4.0/`) and `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (persistent; e.g. `~/.claude/plugins/data/dpd-agent-dpd/.venv/`, venv lazy-bootstrapped by `packaging/claude-code/hooks/session-start.sh`).
+The plugin lays out `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (read-only on update; e.g. `~/.claude/plugins/cache/agent-dpd/dpd/0.5.0/`) and `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (persistent; e.g. `~/.claude/plugins/data/dpd-agent-dpd/.venv/`, venv lazy-bootstrapped by `packaging/claude-code/hooks/session-start.sh`).
 
 Runtime DPD data lives at `~/.claude/dpd-server/data/<encoded-agent-scope>/graph.sqlite`. Override with `DPD_DATA_DIR` (tests use this).
 
