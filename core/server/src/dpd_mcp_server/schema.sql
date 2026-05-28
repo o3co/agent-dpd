@@ -109,7 +109,10 @@ CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(session_id, from_node);
 -- paste-mode (paste / "Alice"). verified_by is free-form (taxonomy unstable).
 CREATE TABLE IF NOT EXISTS edge_verifications (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    edge_id     INTEGER NOT NULL REFERENCES edges(id),
+    -- ON DELETE CASCADE: deleting an edge drops its verification audit too,
+    -- so the existing edge-deletion paths (delete_edge / force_delete /
+    -- delete_subgraph / purge_session) keep working under foreign_keys=ON.
+    edge_id     INTEGER NOT NULL REFERENCES edges(id) ON DELETE CASCADE,
     verified_by TEXT,
     verified_at TEXT,
     method      TEXT,

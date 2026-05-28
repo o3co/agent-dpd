@@ -1074,6 +1074,33 @@ def test_record_edge_verification_unknown_edge_raises(tmp_db_path: str) -> None:
         )
 
 
+def test_delete_edge_cascades_verifications(tmp_db_path: str) -> None:
+    """#42: deleting an edge that has verification records must not raise a
+    FOREIGN KEY error — edge_verifications.edge_id has ON DELETE CASCADE, so
+    the rows are removed with the edge (foreign_keys=ON via Storage.connect)."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary",
+    )
+    storage.record_edge_verification(
+        session_id="ses_1", edge_id=edge_id,
+        verified_by="codex", method="external:codex", verdict="holds",
+        notes=None, prompt_hash=None, now="2026-05-20T12:00:00Z",
+    )
+
+    # Previously this raised "FOREIGN KEY constraint failed".
+    storage.delete_edge(
+        session_id="ses_1", edge_id=edge_id, now="2026-05-20T12:30:00Z",
+    )
+
+    assert storage.list_edges(session_id="ses_1") == []
+    assert storage.list_edge_verifications(
+        session_id="ses_1", edge_id=edge_id) == []
+
+
 def _seed_three_endpoints(storage: Storage) -> None:
     _seed_two_endpoints(storage)
     storage.insert_node(

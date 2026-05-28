@@ -54,7 +54,12 @@ def migrate(*, db_path: str) -> None:
                 """
                 CREATE TABLE IF NOT EXISTS edge_verifications (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    edge_id     INTEGER NOT NULL REFERENCES edges(id),
+                    -- ON DELETE CASCADE so the existing edge-deletion paths
+                    -- keep working under foreign_keys=ON once an edge has a
+                    -- verification row (delete_edge / force_delete /
+                    -- delete_subgraph / purge_session).
+                    edge_id     INTEGER NOT NULL
+                                REFERENCES edges(id) ON DELETE CASCADE,
                     verified_by TEXT,
                     verified_at TEXT,
                     method      TEXT,
