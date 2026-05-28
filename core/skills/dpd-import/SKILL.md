@@ -143,6 +143,31 @@ For `/fcot` on imported decisions: invoke per decision node found in the importe
 
 ---
 
+## Eager edge-pinning to the focus subgraph (issue #41)
+
+After `bulk_import_subgraph` returns, **propose edges from the imported nodes to open questions / hypotheses in the focus subgraph** before declaring the import done. Without this step, the imported graph sits in `state='archived'` and ends up being cited via free-text inside `rationale` content rather than typed edges — which undermines the value of having a graph at all for cross-source consistency (you can text-search but you cannot edge-walk).
+
+Pattern:
+
+1. Enumerate open `question` / `hypothesis` nodes in the focus subgraph (`list_open_nodes`).
+2. For each, identify the top 1–3 imported nodes most likely to support, contradict, qualify, or provide derivation evidence (`derived_from`, `supports`, `contradicts`, `qualifies`).
+3. Present as a bulk proposal:
+
+   > "Suggested cross-links (4 imported subgraphs → 3 focus open questions):
+   > - q_Q1 ← supports — n_imp_A4 (rate-limit guidance from §2.3)
+   > - q_Q2 ← derived_from — n_imp_B1 (canonical wire format)
+   > - q_Q3 ← qualifies — n_imp_C2 (clock-skew tolerance bound)
+   >
+   > Apply all / select / skip?"
+
+4. Apply confirmed edges via `add_edge`.
+
+Even when the enumeration is imperfect, the user can prune in one pass — that is cheaper than reconstructing edges during decision-formation, where missing edges silently degrade into prose citations.
+
+Skip this step when the import is purely informational (e.g., glossary, change-log) with no clear attachment to current work. Default = propose.
+
+---
+
 ## Notes
 
 - Imported nodes are `state='archived'` — they do not participate in active ambient signal detection. They serve as a reference layer.
