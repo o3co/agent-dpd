@@ -30,6 +30,18 @@ Tone cue: Claude's proposals should be custodial — "ここまでを整理さ�
 
 ---
 
+## Hard rules vs permissive defaults
+
+This document mixes two kinds of guidance. Treat them differently when deciding whether to apply them in a given situation:
+
+- **Hard rules** (always apply, regardless of context) — End modification gate (§5.0), reject suppression (§4.6.1), never auto-resume (§3.3), never auto-decide on user's behalf. Marked with imperative phrasing ("**Stop.**", "must", "never"). Cite these as load-bearing justifications when relevant.
+
+- **Permissive defaults** (starting point, can be overridden on substance) — granularity / phase-ordering / attachment-criterion / End-sizing thresholds / proposal format. Marked inline with **"Permissive default —"** prefix where useful. Substantive considerations (refactor cost, phase-boundary weight, downstream coupling, scope-specific judgment) **can and should override** these. Do not cite a permissive default as the sole justification for a design choice; use it as a prior and re-justify on substance.
+
+Why this distinction exists: when methodology guidance is described as a rule without an explicit permissiveness marker, the agent tends to convert it into a load-bearing justification ("consistent with the granularity policy") rather than treating it as a background prior. That removes the user's leverage on substance.
+
+---
+
 ## Invocation pattern (spec §2)
 
 ### Bottom-up trigger (§2.1)
@@ -176,10 +188,19 @@ Always present a candidate goal and ask explicitly: "こういうゴールで DP
 Before confirming an End anchor (`add_node(type='end', ...)`), aggressively narrow the End:
 
 - If goal text mentions ≥3 distinct outcomes (e.g., "X AND Y AND Z") → propose splitting into multiple narrower Ends or ask user to pick the highest-priority one.
-- If `achievement_conditions` would have 5+ items → flag: "End が広すぎる可能性があります — 分割を提案します" and invite the user to split or trim.
+- If `achievement_conditions` would have ≥6 items → **propose a concrete split** (not a vague flag). Identify intent-clusters in the conditions and present named alternatives with the conditions partitioned. Example:
+
+  > "End has 8 conditions crossing 2 distinct intents (Q-resolution × 4, cross-spec × 4). Propose splitting:
+  > - End A: Q1–Q4 individually resolved (4 conditions)
+  > - End B: cross-spec consistency verified (4 conditions)
+  >
+  > Each becomes an independent drift gate. Apply / modify / proceed with single End?"
+
+  Detecting intent-clusters is an LLM judgment call — the proposal does not need to be perfect, but it must be **concrete and partitioned** (not a flag-then-acknowledge-then-proceed). Acknowledging the size flag inside the End text itself ("NOTE: wide End") is not a substitute for the split proposal.
+
 - End = smallest achievable outcome. "全部含めたい" → use multiple sequential Ends or a multi-subgraph structure.
 
-Rationale: an over-scoped End permits silent drift in all subsequent nodes (spec §3.2.1). Narrow End = accurate drift gate.
+Rationale: an over-scoped End permits silent drift in all subsequent nodes (spec §3.2.1). Narrow End = accurate drift gate. A flag without a concrete alternative is too easy to dismiss, then the End has to be retroactively split mid-flight — which defeats the gate.
 
 ### §3.3 Initial graph construction (adaptive fidelity)
 
@@ -241,6 +262,8 @@ Pool semantic is unified across phases:
 - Ambient Pool: End exists but specific update has no clear attach point
 
 #### §4.2.1 Pool usage decision rule [v0.3.1]
+
+**Permissive default** — substantive considerations (user workflow preference, scope-specific friction, current confidence in attachment) can override this table. The "Tangent catch" row is the closest to a hard rule (Pool prevents stealth attachment), but the short-session / long-session split is just a starting point.
 
 | Session characteristics | Pool strategy |
 |---|---|
