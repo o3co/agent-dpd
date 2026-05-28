@@ -360,6 +360,38 @@ cosmetic:
 
 Severity is optional and free-form (the schema accepts any string). Skip it for single-question or low-volume sessions — the grouping overhead doesn't pay off then.
 
+#### §4.5.2 Sibling-granularity check (skill-only, transient) [v0.4]
+
+**Permissive default** — apply when surfacing nodes accumulated under one parent over a non-trivial session (typically ≥5 new siblings, or visible flatten/atomic asymmetry in the candidates). Skip on small batches.
+
+Before listing pending updates at a natural pause, Claude inspects each new node against its **existing siblings under the same `parent_id`**. If granularity is markedly inconsistent, the node is flagged inline in the proposal so the user can request a split or merge without leaving the §4.5 flow.
+
+**Comparison metric (cheap, no tool call):**
+
+1. **Enumeration-marker count** (primary). Count occurrences of list markers in `text`: `(C1)` / `(N)` style, `1.` / `2.` numbered, `-` / `*` bullets. ≥3 markers signals pre-flattened "N concerns in one node" — already a §4.8 self-check #5 anti-pattern.
+2. **Sentence count** (fallback for prose). Split on `.` / `。` / `?` / `？` / `!` / `！`. Use when neither side has enumeration markers.
+3. **Character length** (last resort). Compare `len(text)` ratios when both other signals are zero.
+
+**Flag rule:** if `ratio(candidate, max_existing_sibling) > 5` on any of (1)–(3), mark the candidate `[granularity review pending]` in the §4.5 listing. The reverse direction (`< 0.2×`) is not flagged in v1 — atomicity drift is a different problem.
+
+**Surfacing format:**
+
+```text
+ここまでを整理させてください:
+
+root_abc (TBD 4)
+  - hypothesis: H1 (5 ratio markers; sibling avg = 1)  ← [granularity review pending]
+    Consider split into: <preview of (C1)…>, <preview of (C2)…>, …
+  - hypothesis: H2
+  - (NEW) decision ← 「Y で行く」
+
+apply / modify / split-H1-then-apply?
+```
+
+**Persistence:** none. The flag is recomputed each pause from the current sibling set; it is **not** stored on the node. If a session restarts, the next pause re-evaluates. This is deliberate (cheapest path): persisting granularity flags requires a schema change, and the value of the flag is mostly in the *surfacing moment*. If empirical use shows the marker needs to survive across sessions, promote to a persistent column (issue #33 axis 1 option A).
+
+**Out of scope here:** automated split/merge (`pool_reject` + re-`add_node` is the manual path); cross-parent granularity comparisons (subgraph-wide consistency is a different invariant).
+
 ### §4.6 User reaction handling
 
 | Reaction | Processing |
@@ -403,7 +435,7 @@ Run these checks **internally each turn** before proposing any graph update. Eac
 | 2 | Would the proposed node extend the subgraph beyond the End's original scope? | Stop. Propose splitting the End or moving the signal to a new subgraph. |
 | 3 | Am I about to write a factual / vendor-spec claim as node text ("X supports Y", "Z is available in repo W")? | Verify via WebSearch / WebFetch before asserting. Do not add unverified claims to the graph. |
 | 4 | Am I about to add a `decision`-type node? | Identify the source evidence. Add a `derived_from` edge from the decision to its source simultaneously. |
-| 5 | Am I about to flatten N≥3 distinct concerns into one node? | Consider creating an intermediate parent node + sub-tree. Rule: sub-tree if each sub-item could be independently discussed, closed, or revised. |
+| 5 | Am I about to flatten N≥3 distinct concerns into one node? | Consider creating an intermediate parent node + sub-tree. Rule: sub-tree if each sub-item could be independently discussed, closed, or revised. **Related:** §4.5.2 surfaces the same anti-pattern when it appears across siblings rather than within one node. |
 | 6 | Am I about to fanout ≥6 `contributes_to` edges to one End? | Apply §4.2.2 norm: keep only logically central nodes. Subgraph membership is implicit contribution. |
 
 **Self-check timing**: before proposing an update at a natural pause. Not after every sentence — at the proposal-formation step.
