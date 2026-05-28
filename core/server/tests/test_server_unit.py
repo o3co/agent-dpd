@@ -171,6 +171,41 @@ def test_add_node_schema_advertises_severity() -> None:
     assert "severity" not in tool.inputSchema.get("required", [])
 
 
+def test_add_edge_schema_advertises_layer_and_priority() -> None:
+    """#42: add_edge must expose optional layer + verification_priority enums."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+    tools = asyncio.run(list_tools())
+    tool = next(t for t in tools if t.name == "add_edge")
+    props = tool.inputSchema["properties"]
+    assert {"necessary", "selective", "invalid"} <= set(props["layer"]["enum"])
+    assert {"critical", "standard", "low"} <= set(
+        props["verification_priority"]["enum"])
+    assert "layer" not in tool.inputSchema["required"]
+    assert "verification_priority" not in tool.inputSchema["required"]
+
+
+def test_proof_tree_discipline_tools_in_registry() -> None:
+    """#42: the discipline tool family must be advertised."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+    tools = asyncio.run(list_tools())
+    names = {t.name for t in tools}
+    for n in ("set_edge_layer", "set_edge_verification_priority",
+              "record_edge_verification", "list_unverified_edges",
+              "list_edge_verifications"):
+        assert n in names, f"missing tool {n}"
+
+    record = next(t for t in tools if t.name == "record_edge_verification")
+    assert set(record.inputSchema["properties"]["verdict"]["enum"]) == {
+        "holds", "holds-with-caveat", "refuted"}
+    assert set(record.inputSchema["required"]) == {
+        "session_id", "edge_id", "verdict"}
+
+    setlayer = next(t for t in tools if t.name == "set_edge_layer")
+    assert set(setlayer.inputSchema["required"]) == {"session_id", "edge_id"}
+
+
 def test_find_similar_dispatched_by_call_tool(tmp_path, monkeypatch) -> None:
     """call_tool routes name='find_similar' to tools.find_similar."""
     import asyncio

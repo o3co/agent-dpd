@@ -888,6 +888,292 @@ def test_add_edge_touches_session_updated_at(tmp_db_path: str) -> None:
     assert session["updated_at"] == "2026-05-20T11:30:00Z"
 
 
+# ---------------------------------------------------------------------------
+# #42 proof-tree discipline: edges.layer / verification_priority,
+# record_edge_verification, list_unverified_edges
+# ---------------------------------------------------------------------------
+
+
+def test_add_edge_accepts_layer_and_priority(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary", verification_priority="critical",
+    )
+
+    row = storage.list_edges(session_id="ses_1")[0]
+    assert row["layer"] == "necessary"
+    assert row["verification_priority"] == "critical"
+
+
+def test_add_edge_layer_and_priority_default_null(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+    )
+
+    row = storage.list_edges(session_id="ses_1")[0]
+    assert row["layer"] is None
+    assert row["verification_priority"] is None
+
+
+def test_add_edge_rejects_invalid_layer(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    with pytest.raises(ValueError, match="layer"):
+        storage.add_edge(
+            session_id="ses_1", from_node="n1", to_node="n2",
+            edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+            layer="bogus",
+        )
+
+
+def test_add_edge_rejects_invalid_priority(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    with pytest.raises(ValueError, match="verification_priority"):
+        storage.add_edge(
+            session_id="ses_1", from_node="n1", to_node="n2",
+            edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+            verification_priority="urgent",
+        )
+
+
+def test_set_edge_layer_updates_and_clears(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary",
+    )
+
+    storage.set_edge_layer(
+        session_id="ses_1", edge_id=edge_id, layer="selective",
+        now="2026-05-20T11:05:00Z",
+    )
+    assert storage.list_edges(session_id="ses_1")[0]["layer"] == "selective"
+
+    # clearing (retraction: out of discipline)
+    storage.set_edge_layer(
+        session_id="ses_1", edge_id=edge_id, layer=None,
+        now="2026-05-20T11:06:00Z",
+    )
+    assert storage.list_edges(session_id="ses_1")[0]["layer"] is None
+    assert storage.get_session(session_id="ses_1")["updated_at"] == \
+        "2026-05-20T11:06:00Z"
+
+
+def test_set_edge_layer_rejects_invalid(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+    )
+    with pytest.raises(ValueError, match="layer"):
+        storage.set_edge_layer(
+            session_id="ses_1", edge_id=edge_id, layer="bogus",
+            now="2026-05-20T11:05:00Z",
+        )
+
+
+def test_set_edge_layer_unknown_edge_raises(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    with pytest.raises(ValueError, match="edge_id"):
+        storage.set_edge_layer(
+            session_id="ses_1", edge_id=99999, layer="necessary",
+            now="2026-05-20T11:05:00Z",
+        )
+
+
+def test_set_edge_verification_priority_updates(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+    )
+    storage.set_edge_verification_priority(
+        session_id="ses_1", edge_id=edge_id, verification_priority="low",
+        now="2026-05-20T11:05:00Z",
+    )
+    assert storage.list_edges(session_id="ses_1")[0][
+        "verification_priority"] == "low"
+
+
+def test_set_edge_verification_priority_rejects_invalid(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+    )
+    with pytest.raises(ValueError, match="verification_priority"):
+        storage.set_edge_verification_priority(
+            session_id="ses_1", edge_id=edge_id, verification_priority="nope",
+            now="2026-05-20T11:05:00Z",
+        )
+
+
+def test_record_edge_verification_inserts(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary",
+    )
+    vid = storage.record_edge_verification(
+        session_id="ses_1", edge_id=edge_id,
+        verified_by="codex", method="external:codex", verdict="holds",
+        notes="follows directly", prompt_hash="abc123",
+        now="2026-05-20T12:00:00Z",
+    )
+    assert isinstance(vid, int)
+    rows = storage.list_edge_verifications(session_id="ses_1", edge_id=edge_id)
+    assert len(rows) == 1
+    assert rows[0]["verdict"] == "holds"
+    assert rows[0]["verified_by"] == "codex"
+    assert rows[0]["prompt_hash"] == "abc123"
+
+
+def test_record_edge_verification_rejects_invalid_verdict(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary",
+    )
+    with pytest.raises(ValueError, match="verdict"):
+        storage.record_edge_verification(
+            session_id="ses_1", edge_id=edge_id,
+            verified_by="codex", method="external:codex", verdict="maybe",
+            notes=None, prompt_hash=None, now="2026-05-20T12:00:00Z",
+        )
+
+
+def test_record_edge_verification_unknown_edge_raises(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    with pytest.raises(ValueError, match="edge_id"):
+        storage.record_edge_verification(
+            session_id="ses_1", edge_id=99999,
+            verified_by="codex", method="external:codex", verdict="holds",
+            notes=None, prompt_hash=None, now="2026-05-20T12:00:00Z",
+        )
+
+
+def _seed_three_endpoints(storage: Storage) -> None:
+    _seed_two_endpoints(storage)
+    storage.insert_node(
+        node_id="n3", session_id="ses_1", node_type="decision",
+        text="d", parent_id="n2", parent_kind="node",
+        now="2026-05-20T10:03:00Z",
+    )
+
+
+def test_list_unverified_edges_returns_necessary_without_verification(
+    tmp_db_path: str,
+) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary",
+    )
+    rows = storage.list_unverified_edges(session_id="ses_1")
+    assert [r["id"] for r in rows] == [edge_id]
+
+
+def test_list_unverified_edges_excludes_verified(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+    edge_id = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary",
+    )
+    storage.record_edge_verification(
+        session_id="ses_1", edge_id=edge_id,
+        verified_by="codex", method="external:codex", verdict="holds",
+        notes=None, prompt_hash=None, now="2026-05-20T12:00:00Z",
+    )
+    assert storage.list_unverified_edges(session_id="ses_1") == []
+
+
+def test_list_unverified_edges_excludes_non_necessary(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_three_endpoints(storage)
+    # selective, invalid, and untagged edges are NOT verification obligations
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="supports", reason=None, now="2026-05-20T11:00:00Z",
+        layer="selective",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="n2", to_node="n3",
+        edge_type="supports", reason=None, now="2026-05-20T11:01:00Z",
+        layer="invalid",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n3",
+        edge_type="supports", reason=None, now="2026-05-20T11:02:00Z",
+    )
+    assert storage.list_unverified_edges(session_id="ses_1") == []
+
+
+def test_list_unverified_edges_orders_by_priority(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_three_endpoints(storage)
+    low = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary", verification_priority="low",
+    )
+    crit = storage.add_edge(
+        session_id="ses_1", from_node="n2", to_node="n3",
+        edge_type="requires", reason=None, now="2026-05-20T11:01:00Z",
+        layer="necessary", verification_priority="critical",
+    )
+    std = storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n3",
+        edge_type="requires", reason=None, now="2026-05-20T11:02:00Z",
+        layer="necessary", verification_priority="standard",
+    )
+    rows = storage.list_unverified_edges(session_id="ses_1")
+    assert [r["id"] for r in rows] == [crit, std, low]
+
+
+def test_list_unverified_edges_filters_by_priority(tmp_db_path: str) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_three_endpoints(storage)
+    crit = storage.add_edge(
+        session_id="ses_1", from_node="n2", to_node="n3",
+        edge_type="requires", reason=None, now="2026-05-20T11:01:00Z",
+        layer="necessary", verification_priority="critical",
+    )
+    storage.add_edge(
+        session_id="ses_1", from_node="n1", to_node="n2",
+        edge_type="requires", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary", verification_priority="low",
+    )
+    rows = storage.list_unverified_edges(
+        session_id="ses_1", verification_priority="critical")
+    assert [r["id"] for r in rows] == [crit]
+
+
 def test_get_root_round_trips(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     storage.insert_session(
@@ -1830,7 +2116,7 @@ def test_storage_open_migrates_v2_to_v3_schema(tmp_db_path: str) -> None:
         assert col in node_cols, f"missing nodes.{col}"
     for col in ("scope", "scope_root", "migrated_to_start_id"):
         assert col in root_cols, f"missing roots.{col}"
-    assert version == 6, f"user_version should be 6, got {version}"
+    assert version == 7, f"user_version should be 7, got {version}"
 
 
 def test_storage_open_migrates_v3_to_v4_schema(tmp_db_path: str) -> None:
@@ -1906,7 +2192,7 @@ def test_storage_open_migrates_v3_to_v4_schema(tmp_db_path: str) -> None:
         )
 
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 6, f"expected user_version=6 after migration, got {version}"
+        assert version == 7, f"expected user_version=7 after migration, got {version}"
 
 
 def test_v3_scope_root_requires_non_null_scope(tmp_db_path: str) -> None:
@@ -2585,7 +2871,7 @@ def test_v4_user_version_is_4(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     with storage.connect() as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 6
+    assert version == 7
 
 
 def test_v4_pool_rejected_index_exists(tmp_db_path: str) -> None:
@@ -2659,7 +2945,7 @@ def test_storage_open_migrates_v2_to_v4_schema(tmp_db_path: str) -> None:
         )
 
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 6, f"expected user_version=6 after v2→v6 migration, got {version}"
+        assert version == 7, f"expected user_version=7 after v2→v7 migration, got {version}"
 
 
 def test_open_creates_subgraphs_fts_virtual_table(tmp_db_path: str) -> None:
@@ -2679,7 +2965,7 @@ def test_open_bumps_user_version_to_5(tmp_db_path: str) -> None:
     Storage.open(tmp_db_path)
     with sqlite3.connect(tmp_db_path) as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 6
+    assert version == 7
 
 
 def test_subgraphs_fts_uses_trigram_tokenizer(tmp_db_path: str) -> None:
@@ -2737,7 +3023,7 @@ def test_open_chains_v3_v4_v5_migrations(tmp_db_path: str) -> None:
         names = {row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         )}
-    assert version == 6
+    assert version == 7
     assert "subgraphs_fts" in names
 
 
@@ -2772,5 +3058,5 @@ def test_open_v4_db_runs_v4_to_v5_backfill(tmp_db_path: str) -> None:
         anchor = conn.execute(
             "SELECT anchor_text FROM subgraphs_fts WHERE start_node_id = 'ns'"
         ).fetchone()
-    assert version == 6
+    assert version == 7
     assert anchor is not None and "OPEN-AGAIN" in anchor[0]
