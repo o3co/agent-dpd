@@ -1,6 +1,6 @@
 {
   "name": "dpd",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "DPD (Decompose-Propagate Decision): a graph-based protocol for structuring AI conversations as decision graphs. Ships an MCP server + skill family (/dpd, /dpd-status, /dpd-fill, ...).",
   "author": {
     "name": "1o1 Co. Ltd.",

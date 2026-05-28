@@ -41,6 +41,7 @@ Each sub-skill is a directory with its own `SKILL.md`. They are independently in
 | [`dpd-edit`](dpd-edit/) | Manual edit of a node or Pool item — wraps `close_node`, `add_node(provenance='manual')`, `pool_reject`, Pool unsuppress. Used when the user wants direct control beyond ambient mode. |
 | [`dpd-fill`](dpd-fill/) | Generate inferred nodes for the current graph: missing decompositions, unstated assumptions, gap candidates. Each inferred node requires user opt-in. Often paired with `/fcot` for falsification. |
 | [`dpd-import`](dpd-import/) | Import an external prose/spec/graph document as a hypothetical archived DPD subgraph. Used in the `dpd-import → dpd-fill → /fcot` pipeline for systematic gap analysis (e.g., self-validating a spec). |
+| [`dpd-verify-edge`](dpd-verify-edge/) | Externally verify a `layer='necessary'` edge (proof-tree discipline, #42) via a context-stripped prompt, so an independent verifier judges the implication without rubber-stamping. Records the verdict; `refuted` proposes (never auto-applies) a downgrade. |
 
 The `dpd-import → dpd-fill → /fcot` pipeline is **one documented** self-validation flow — the same one the v0.3.1 spec itself was checked against. `/fcot` runs automatically on high-stakes inferred nodes and is opt-in elsewhere, so the pipeline's verification cost scales with the rigor you need. See the top-level [`README.md`](../README.md#built-agent-driven-with-dpd) for the dogfood narrative.
 

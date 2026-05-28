@@ -7,6 +7,53 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-28
+
+Adds **proof-tree discipline** (#42): an optional, opt-in rigor mode that
+classifies edges by epistemic status and adds an external-verification path
+for logically-necessary steps. The design was worked out across a 5-axis DPD
+dogfooding session, each axis externally verified by Codex (context-stripped).
+All changes are additive — no breaking changes.
+
+### Schema migration (v6 → v7)
+
+- Adds `edges.layer` (TEXT, nullable) — `'necessary'` / `'selective'` /
+  `'invalid'`; orthogonal to `edges.type`. NULL = discipline not applied. (#42)
+- Adds `edges.verification_priority` (TEXT, nullable) — `'critical'` /
+  `'standard'` / `'low'`; drives the `list_unverified_edges` queue order. (#42)
+- Adds the `edge_verifications` table — an append-only audit of external
+  verification runs (1:many; `verdict`, `verified_by`, `method`, `notes`,
+  `prompt_hash`). (#42)
+- Migration is additive and runs automatically on `Storage.open()`; existing
+  rows get NULL. CHECK constraints are present on fresh databases; on
+  ALTER-upgraded databases the closed taxonomies are enforced in app code.
+  Forward-only (no downgrade), per the `0.x` policy.
+
+### New MCP tools (#42)
+
+- `set_edge_layer`, `set_edge_verification_priority` — set/clear the new edge
+  fields (retraction: `layer=null` removes an edge from the discipline).
+- `record_edge_verification` — append an external verdict (`holds` /
+  `holds-with-caveat` / `refuted`). A `refuted` verdict never auto-downgrades
+  the edge; the downgrade is proposed via `set_edge_layer`.
+- `list_unverified_edges` — necessary edges with no verification record yet
+  (obligation is edge-local, keyed off `layer='necessary'`).
+- `list_edge_verifications` — re-verification history for one edge.
+- `add_edge` gains optional `layer` + `verification_priority` (additive).
+
+39 MCP tools total.
+
+### Skills
+
+- **New `/dpd-verify-edge` skill** — builds a context-stripped prompt for a
+  necessary edge so an independent verifier judges the implication on its own
+  merits (paste baseline + optional auto-invoke; same prompt builder + parser),
+  parses `VERDICT:`/`CAVEAT:`, and records it. Composes with `/fcot` (construct
+  vs. check) rather than merging. (#42)
+- **`/dpd` SKILL.md** gains a "Proof-tree discipline" section: the `layer`
+  taxonomy, the edge-local implicit opt-in invariant, multi-premise layout,
+  the verification flow, and retraction. New tool-reference rows. (#42)
+
 ## [0.5.0] — 2026-05-28
 
 Issue-driven release: closes nine GitHub issues surfaced from v0.4.0 dogfood

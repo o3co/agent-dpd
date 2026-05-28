@@ -588,9 +588,14 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred`. |
 | `list_open_nodes(session_id, root_id?, state?)` | Open nodes in session or within one root. `state` filter narrows by node state string. |
 | `list_unblocked_open_nodes(session_id, root_id?, blocker_edge_type?)` | Open nodes that no open node is blocking via the given edge type (default `'blocks'`). |
-| `add_edge(session_id, from_node, to_node, type, reason?)` | Insert an edge between nodes. `type` is enforced against the canonical vocabulary (see Edge type table below). Self-loops rejected. |
+| `add_edge(session_id, from_node, to_node, type, reason?, layer?, verification_priority?)` | Insert an edge between nodes. `type` is enforced against the canonical vocabulary (see Edge type table below). Self-loops rejected. **[v0.6]** `layer` ∈ `'necessary'`/`'selective'`/`'invalid'` (proof-tree discipline, see that section); `verification_priority` ∈ `'critical'`/`'standard'`/`'low'`. Both optional/nullable. |
 | `delete_edge(session_id, edge_id)` | Delete a single edge by id. Use to clean up mis-typed or stale edges (e.g., wrong direction). |
 | `list_edges(session_id, from_node?, to_node?, type?)` | List edges with optional filters (AND'd). |
+| `set_edge_layer(session_id, edge_id, layer?)` | **[v0.6]** Set/clear an edge's proof-tree `layer`. `layer=null` retracts from the discipline. Use for downgrade (refuted `necessary` → `selective`/`invalid`). |
+| `set_edge_verification_priority(session_id, edge_id, verification_priority?)` | **[v0.6]** Set/clear an edge's `verification_priority`. `null` drops queue pressure without changing layer. |
+| `record_edge_verification(session_id, edge_id, verdict, verified_by?, method?, notes?, prompt_hash?)` | **[v0.6]** Append an external-verification record (`verdict` ∈ `holds`/`holds-with-caveat`/`refuted`). Append-only; `refuted` does NOT auto-downgrade. Produced by `/dpd-verify-edge`. |
+| `list_unverified_edges(session_id, verification_priority?)` | **[v0.6]** Necessary edges with no verification record yet (obligation keyed off `layer='necessary'`), ordered critical→standard→low→unset. |
+| `list_edge_verifications(session_id, edge_id)` | **[v0.6]** All verification records for one edge, oldest first (re-verification history). |
 | `export_mermaid(session_id, root_id?, max_label_chars?)` | Render as Mermaid `graph TD` text. `max_label_chars` caps node label length (default 60, ellipsis on overflow). Pass `null` to disable truncation — use when embedding in README/docs where full labels matter. |
 | `export_yaml(session_id, root_id?)` | JSON-formatted YAML dump (json.loads round-trippable). |
 | `get_node(session_id, node_id)` | Fetch single node. |
@@ -643,6 +648,56 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 **Direction rule**: from-side is the "active" side (supporting, contradicting, deriving); to-side is the target.
 
 **Extending the vocabulary** is a deliberate spec change — propose a new type with use case and direction rule in an issue rather than introducing it ad-hoc. Free-form types would fragment cross-session semantics (e.g., `find_similar` retrieval, `list_unblocked_open_nodes` queries).
+
+---
+
+## Proof-tree discipline [v0.6] (#42)
+
+An **optional, opt-in** rigor mode for stretches of reasoning that are meant to be proof-like — where it matters whether a step *logically follows* versus is *a choice*. It is orthogonal to everything above: it adds an epistemic `layer` to edges and an external-verification path. Most of a session is exploratory and should NOT carry it; rigor is usually needed late, near a decision.
+
+### The `layer` dimension (orthogonal to edge `type`)
+
+`add_edge(..., layer?, verification_priority?)` and `set_edge_layer` classify an edge's epistemic status, independent of its relationship `type`:
+
+| `layer` | Meaning |
+|---|---|
+| `necessary` | A logical/mathematical implication — externally verifiable. The premise(s) *necessarily* yield the conclusion. |
+| `selective` | A choice among logically-allowed alternatives (a judgement call, not forced). |
+| `invalid` | A claim shown to be unsupported — **kept, not deleted**, for audit. |
+| (unset / NULL) | Discipline not applied to this edge. |
+
+`type` stays the relationship kind (`supports`, `requires`, …); `layer` says whether that relationship is forced, chosen, or refuted. A single `supports` edge can be `necessary` in one proof and `selective` in another.
+
+### Opt-in is edge-local and implicit (hard rule)
+
+**Tagging an edge with a `layer` IS the opt-in.** There is no session/region "discipline flag". This has one strict invariant:
+
+> The discipline is **edge-local**. A tagged edge opts *that edge* in. Untagged edges are explicitly **outside** the discipline. **Never infer** that a neighbouring/surrounding region is "under discipline" because one edge in it is tagged.
+
+Mid-session escalation is therefore free: start tagging when rigor begins, nothing to declare. The signal lives in the DB, so it survives context compaction.
+
+### Multi-premise proofs (layout)
+
+Keep one structural `parent_id` per node under Start (the spanning tree `mark_reached` archives — see §5.1.3). Express *additional* premises as `layer='necessary'` edges riding on top. The proof's full derivation DAG is the union of the spanning tree + the necessary edges.
+
+### Verification flow
+
+The verification obligation is **edge-local and keyed off `layer='necessary'`** (selective/invalid carry none):
+
+1. `list_unverified_edges(session_id, verification_priority?)` → necessary edges with no verification record, ordered critical→standard→low→unset.
+2. `/dpd-verify-edge [edge_id?]` builds a context-stripped prompt, gets an independent verdict, and calls `record_edge_verification`.
+3. Verdicts: `holds` / `holds-with-caveat` (follows only under an explicit assumption — propose a structural fix) / `refuted` (does **not** follow).
+4. **`refuted` never auto-downgrades** the edge. Record it, then *propose* `set_edge_layer(layer='selective'|'invalid')`. A verifier can be wrong; the user adjudicates.
+
+### Retraction (cheap, explicit)
+
+- `set_edge_layer(edge_id, layer=null)` — retract the edge from the discipline entirely.
+- `set_edge_layer(edge_id, layer='selective'|'invalid')` — keep the classification, drop the verification obligation.
+- `set_edge_verification_priority(edge_id, verification_priority=null)` — drop queue pressure without changing the layer.
+
+### Deferred
+
+Completion-% reporting ("this region is N% classified") is intentionally **unavailable** — there is no declared region boundary by design. If an explicit region model is later needed, it layers on top (a `discipline_regions` table) without reinterpreting existing tagged edges.
 
 ---
 
