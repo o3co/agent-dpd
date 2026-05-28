@@ -100,8 +100,13 @@ CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(session_id, from_node);
 
 -- v7 (#42): append-only audit of external verification runs for edges
 -- (1:many — supports re-verification history). verdict ∈ {holds,
--- holds-with-caveat, refuted}; verified_by is free-form (verifier taxonomy
--- unstable); prompt_hash records the context-stripped prompt for drift audit.
+-- holds-with-caveat, refuted}; prompt_hash records the context-stripped
+-- prompt for drift audit.
+-- method vs verified_by are deliberately distinct, not redundant:
+--   method      = transport/tool ('external:codex', 'paste')  — HOW verified
+--   verified_by = verifier identity ('codex', 'claude', a human name) — WHO
+-- They coincide in auto-invoke (external:codex / codex) but separate in
+-- paste-mode (paste / "Alice"). verified_by is free-form (taxonomy unstable).
 CREATE TABLE IF NOT EXISTS edge_verifications (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     edge_id     INTEGER NOT NULL REFERENCES edges(id),
