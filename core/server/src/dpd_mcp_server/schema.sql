@@ -83,11 +83,38 @@ CREATE TABLE IF NOT EXISTS edges (
     to_node     TEXT NOT NULL,
     type        TEXT NOT NULL,
     reason      TEXT,
+    -- v7 (#42): proof-tree discipline. layer = epistemic status, orthogonal
+    -- to type (the relationship kind). NULL = discipline not applied.
+    -- CHECK present only on fresh DBs; ALTER-upgraded DBs enforce the closed
+    -- taxonomy in app code (Storage.add_edge / set_edge_layer).
+    layer       TEXT
+        CHECK (layer IS NULL OR layer IN ('necessary','selective','invalid')),
+    verification_priority TEXT
+        CHECK (verification_priority IS NULL OR
+               verification_priority IN ('critical','standard','low')),
     created_at  TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_edges_session ON edges(session_id);
 CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(session_id, from_node);
+
+-- v7 (#42): append-only audit of external verification runs for edges
+-- (1:many — supports re-verification history). verdict ∈ {holds,
+-- holds-with-caveat, refuted}; verified_by is free-form (verifier taxonomy
+-- unstable); prompt_hash records the context-stripped prompt for drift audit.
+CREATE TABLE IF NOT EXISTS edge_verifications (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    edge_id     INTEGER NOT NULL REFERENCES edges(id),
+    verified_by TEXT,
+    verified_at TEXT,
+    method      TEXT,
+    verdict     TEXT,
+    notes       TEXT,
+    prompt_hash TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_edge_verifications_edge
+    ON edge_verifications(edge_id);
 
 CREATE TABLE IF NOT EXISTS pool_items (
     id                TEXT PRIMARY KEY,
@@ -121,4 +148,4 @@ CREATE VIRTUAL TABLE IF NOT EXISTS subgraphs_fts USING fts5(
     tokenize = 'trigram'
 );
 
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;

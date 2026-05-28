@@ -300,10 +300,13 @@ def add_edge(
     to_node = _required(arguments, "to_node")
     edge_type = _required(arguments, "type")
     reason = arguments.get("reason") or None
+    layer = arguments.get("layer") or None
+    verification_priority = arguments.get("verification_priority") or None
     edge_id = storage.add_edge(
         session_id=session_id,
         from_node=from_node, to_node=to_node,
         edge_type=edge_type, reason=reason, now=now,
+        layer=layer, verification_priority=verification_priority,
     )
     return {"edge_id": edge_id}
 
@@ -322,6 +325,85 @@ def list_edges(
         edge_type=edge_type,
     )
     return {"edges": [_row_to_dict(r) for r in rows]}
+
+
+def set_edge_layer(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    edge_id = int(_required(arguments, "edge_id"))
+    layer = arguments.get("layer") or None
+    storage.set_edge_layer(
+        session_id=session_id, edge_id=edge_id, layer=layer, now=now,
+    )
+    return {"edge_id": edge_id, "layer": layer}
+
+
+def set_edge_verification_priority(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    edge_id = int(_required(arguments, "edge_id"))
+    verification_priority = arguments.get("verification_priority") or None
+    storage.set_edge_verification_priority(
+        session_id=session_id, edge_id=edge_id,
+        verification_priority=verification_priority, now=now,
+    )
+    return {"edge_id": edge_id, "verification_priority": verification_priority}
+
+
+def record_edge_verification(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    edge_id = int(_required(arguments, "edge_id"))
+    verdict = _required(arguments, "verdict")
+    verification_id = storage.record_edge_verification(
+        session_id=session_id, edge_id=edge_id,
+        verified_by=arguments.get("verified_by") or None,
+        method=arguments.get("method") or None,
+        verdict=verdict,
+        notes=arguments.get("notes") or None,
+        prompt_hash=arguments.get("prompt_hash") or None,
+        now=now,
+    )
+    return {"verification_id": verification_id, "edge_id": edge_id,
+            "verdict": verdict}
+
+
+def list_unverified_edges(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    verification_priority = arguments.get("verification_priority") or None
+    rows = storage.list_unverified_edges(
+        session_id=session_id, verification_priority=verification_priority,
+    )
+    return {"edges": [_row_to_dict(r) for r in rows]}
+
+
+def list_edge_verifications(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    session_id = _required(arguments, "session_id")
+    edge_id = int(_required(arguments, "edge_id"))
+    rows = storage.list_edge_verifications(
+        session_id=session_id, edge_id=edge_id,
+    )
+    return {"verifications": [_row_to_dict(r) for r in rows]}
 
 
 def delete_edge(

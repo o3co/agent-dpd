@@ -53,13 +53,13 @@ def test_migrate_adds_severity_column(tmp_path: Path) -> None:
 
 def test_migrate_is_idempotent(tmp_path: Path) -> None:
     db_path = str(tmp_path / "graph.sqlite")
-    Storage.open(db_path)  # already v6
+    Storage.open(db_path)  # Storage.open migrates all the way to the latest
 
-    migrate(db_path=db_path)  # should no-op
+    migrate(db_path=db_path)  # v5→v6 must no-op (version already ≥ 6)
 
     with sqlite3.connect(db_path) as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 6
+    assert version == 7
 
 
 def test_migrate_preserves_existing_node_rows(tmp_path: Path) -> None:

@@ -423,6 +423,16 @@ async def list_tools() -> list[types.Tool]:
                         ],
                     },
                     "reason": {"type": ["string", "null"]},
+                    "layer": {
+                        "type": ["string", "null"],
+                        "enum": ["necessary", "selective", "invalid", None],
+                        "description": "#42 proof-tree discipline: epistemic status, orthogonal to type. 'necessary'=logical implication (verify externally), 'selective'=a choice among logically-allowed options, 'invalid'=claim shown unsupported (kept for audit). Tagging an edge is the edge-local opt-in; untagged edges are outside the discipline. NULL = not applied.",
+                    },
+                    "verification_priority": {
+                        "type": ["string", "null"],
+                        "enum": ["critical", "standard", "low", None],
+                        "description": "#42: orders the list_unverified_edges queue for necessary edges. Optional.",
+                    },
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
@@ -471,6 +481,146 @@ async def list_tools() -> list[types.Tool]:
                         "type": ["string", "null"],
                         "description": "Filter by edge type (e.g., 'derived_from', 'contradicts').",
                     },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="set_edge_layer",
+            title="Set edge layer",
+            description=(
+                "#42 proof-tree discipline: set or clear an edge's epistemic "
+                "layer ('necessary'/'selective'/'invalid'). layer=null retracts "
+                "the edge from the discipline. Used for retraction/downgrade "
+                "(e.g. a refuted 'necessary' edge → 'selective' or 'invalid')."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "edge_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "edge_id": {"type": "integer"},
+                    "layer": {
+                        "type": ["string", "null"],
+                        "enum": ["necessary", "selective", "invalid", None],
+                        "description": "New layer, or null to retract from the discipline.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="set_edge_verification_priority",
+            title="Set edge verification priority",
+            description=(
+                "#42: set or clear an edge's verification_priority "
+                "('critical'/'standard'/'low'). null drops queue pressure "
+                "without changing the edge's layer."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "edge_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "edge_id": {"type": "integer"},
+                    "verification_priority": {
+                        "type": ["string", "null"],
+                        "enum": ["critical", "standard", "low", None],
+                        "description": "New priority, or null to clear.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="record_edge_verification",
+            title="Record edge verification",
+            description=(
+                "#42: append an external-verification record for an edge "
+                "(produced by /dpd-verify-edge). Append-only (1:many) — "
+                "re-verification adds rows, preserving history. A 'refuted' "
+                "verdict does NOT auto-downgrade the edge; propose the "
+                "downgrade to the user / via set_edge_layer."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "edge_id", "verdict"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "edge_id": {"type": "integer"},
+                    "verdict": {
+                        "type": "string",
+                        "enum": ["holds", "holds-with-caveat", "refuted"],
+                        "description": "holds=follows as stated; holds-with-caveat=follows only under an explicit assumption/definition/qualifier (state it in notes); refuted=does not follow / counterexample.",
+                    },
+                    "verified_by": {
+                        "type": ["string", "null"],
+                        "description": "Free-form verifier id (e.g. 'codex', 'claude', a human name).",
+                    },
+                    "method": {
+                        "type": ["string", "null"],
+                        "description": "How it was verified, e.g. 'external:codex', 'paste'.",
+                    },
+                    "notes": {"type": ["string", "null"]},
+                    "prompt_hash": {
+                        "type": ["string", "null"],
+                        "description": "Hash (or text) of the context-stripped prompt, for drift audit.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="list_unverified_edges",
+            title="List unverified edges",
+            description=(
+                "#42: return necessary edges that have no verification record "
+                "yet (the verification obligation is edge-local and keyed off "
+                "layer='necessary' — selective/invalid carry no obligation). "
+                "Ordered by verification_priority (critical→standard→low→unset)."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "verification_priority": {
+                        "type": ["string", "null"],
+                        "enum": ["critical", "standard", "low", None],
+                        "description": "Restrict to one priority bucket. Omit for all.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="list_edge_verifications",
+            title="List edge verifications",
+            description=(
+                "#42: return all verification records for one edge, oldest "
+                "first (the re-verification history)."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id", "edge_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "edge_id": {"type": "integer"},
                     "agent_scope": {
                         "type": ["string", "null"],
                         "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
@@ -1064,6 +1214,20 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.delete_edge(storage=storage, arguments=tool_args, now=now)
     if name == "list_edges":
         return tools.list_edges(storage=storage, arguments=tool_args)
+    if name == "set_edge_layer":
+        return tools.set_edge_layer(storage=storage, arguments=tool_args, now=now)
+    if name == "set_edge_verification_priority":
+        return tools.set_edge_verification_priority(
+            storage=storage, arguments=tool_args, now=now
+        )
+    if name == "record_edge_verification":
+        return tools.record_edge_verification(
+            storage=storage, arguments=tool_args, now=now
+        )
+    if name == "list_unverified_edges":
+        return tools.list_unverified_edges(storage=storage, arguments=tool_args)
+    if name == "list_edge_verifications":
+        return tools.list_edge_verifications(storage=storage, arguments=tool_args)
     if name == "list_unblocked_open_nodes":
         return tools.list_unblocked_open_nodes(
             storage=storage, arguments=tool_args

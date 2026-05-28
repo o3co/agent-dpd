@@ -27,28 +27,34 @@ class Storage:
           - user_version = 2: run _migrate_v2_to_v3 (structural rebuild),
             then migrate_v3_to_v4 (ALTER TABLE + partial index),
             then migrate_v4_to_v5 (FTS table + backfill),
-            then migrate_v5_to_v6 (ALTER TABLE: nodes.severity).
-          - user_version = 3: run v3→v4, v4→v5, v5→v6.
-          - user_version = 4: run v4→v5, v5→v6.
-          - user_version = 5: run v5→v6 only.
-          - user_version >= 6: no migration needed; schema.sql is applied
+            then migrate_v5_to_v6 (ALTER TABLE: nodes.severity),
+            then migrate_v6_to_v7 (ALTER TABLE: edges.layer +
+            verification_priority; CREATE edge_verifications).
+          - user_version = 3: run v3→v4, v4→v5, v5→v6, v6→v7.
+          - user_version = 4: run v4→v5, v5→v6, v6→v7.
+          - user_version = 5: run v5→v6, v6→v7.
+          - user_version = 6: run v6→v7 only.
+          - user_version >= 7: no migration needed; schema.sql is applied
             (CREATE TABLE IF NOT EXISTS is idempotent).
 
         SQLite limitation: ALTER TABLE cannot add CHECK constraints, so the
-        table-level CHECK (scope_root = 0 OR scope IS NOT NULL) is only present
-        on freshly-created v3+ databases. For upgraded databases, this invariant
-        is enforced at runtime by the Task 4 migration script.
+        table-level CHECK (scope_root = 0 OR scope IS NOT NULL) and the
+        column-level edges.layer / verification_priority CHECKs are only
+        present on freshly-created databases. For upgraded databases, these
+        invariants are enforced at runtime by the migration scripts / app code.
         """
         from .migrate_v3_to_v4 import migrate as _migrate_v3_to_v4
         from .migrate_v4_to_v5 import migrate as _migrate_v4_to_v5
         from .migrate_v5_to_v6 import migrate as _migrate_v5_to_v6
+        from .migrate_v6_to_v7 import migrate as _migrate_v6_to_v7
 
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
         # Read user_version BEFORE running schema.sql so we can dispatch to the
-        # correct migration path.  schema.sql unconditionally sets user_version=5,
-        # so reading the version after executescript() would always return 5 and
-        # make the v3→v4 branch unreachable for genuine v3 databases.
+        # correct migration path.  schema.sql unconditionally sets the current
+        # user_version, so reading the version after executescript() would
+        # always return the latest and make the upgrade branches unreachable
+        # for genuine older databases.
         with sqlite3.connect(db_path) as conn:
             pre_schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
 
@@ -80,15 +86,21 @@ class Storage:
             _migrate_v3_to_v4(db_path=db_path)
             _migrate_v4_to_v5(db_path=db_path)
             _migrate_v5_to_v6(db_path=db_path)
+            _migrate_v6_to_v7(db_path=db_path)
         elif pre_schema_version == 3:
             _migrate_v3_to_v4(db_path=db_path)
             _migrate_v4_to_v5(db_path=db_path)
             _migrate_v5_to_v6(db_path=db_path)
+            _migrate_v6_to_v7(db_path=db_path)
         elif pre_schema_version == 4:
             _migrate_v4_to_v5(db_path=db_path)
             _migrate_v5_to_v6(db_path=db_path)
+            _migrate_v6_to_v7(db_path=db_path)
         elif pre_schema_version == 5:
             _migrate_v5_to_v6(db_path=db_path)
+            _migrate_v6_to_v7(db_path=db_path)
+        elif pre_schema_version == 6:
+            _migrate_v6_to_v7(db_path=db_path)
 
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
@@ -537,6 +549,12 @@ class Storage:
         "contributes_to", "supersedes", "qualifies", "invalidates",
     })
 
+    # #42 proof-tree discipline. layer = epistemic status of an edge,
+    # orthogonal to type. verification verdicts come from /dpd-verify-edge.
+    EDGE_LAYERS = frozenset({"necessary", "selective", "invalid"})
+    VERIFICATION_PRIORITIES = frozenset({"critical", "standard", "low"})
+    VERIFICATION_VERDICTS = frozenset({"holds", "holds-with-caveat", "refuted"})
+
     def add_edge(
         self,
         *,
@@ -546,6 +564,8 @@ class Storage:
         edge_type: str,
         reason: str | None,
         now: str,
+        layer: str | None = None,
+        verification_priority: str | None = None,
     ) -> int:
         """Insert an edge row, validating type, endpoints, and shape.
 
@@ -557,6 +577,12 @@ class Storage:
         ``edge_type`` must be in ``EDGE_TYPES``. Self-loops (from_node ==
         to_node) are rejected — every edge type in the vocabulary is
         directional between distinct entities.
+
+        ``layer`` (#42) optionally classifies the edge into the proof-tree
+        discipline taxonomy (``EDGE_LAYERS``); tagging an edge is the
+        edge-local opt-in. ``verification_priority`` optionally orders the
+        list_unverified_edges queue (``VERIFICATION_PRIORITIES``). Both are
+        validated here because ALTER-upgraded DBs lack the column CHECK.
         """
         if edge_type not in self.EDGE_TYPES:
             raise ValueError(
@@ -567,6 +593,16 @@ class Storage:
             raise ValueError(
                 f"self-loop rejected: from_node and to_node are both "
                 f"{from_node!r}"
+            )
+        if layer is not None and layer not in self.EDGE_LAYERS:
+            raise ValueError(
+                f"layer {layer!r} not in {sorted(self.EDGE_LAYERS)}"
+            )
+        if (verification_priority is not None
+                and verification_priority not in self.VERIFICATION_PRIORITIES):
+            raise ValueError(
+                f"verification_priority {verification_priority!r} not in "
+                f"{sorted(self.VERIFICATION_PRIORITIES)}"
             )
         with self.connect() as conn:
             for label, endpoint in (("from_node", from_node), ("to_node", to_node)):
@@ -583,12 +619,162 @@ class Storage:
                     )
             cursor = conn.execute(
                 "INSERT INTO edges "
-                "(session_id, from_node, to_node, type, reason, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (session_id, from_node, to_node, edge_type, reason, now),
+                "(session_id, from_node, to_node, type, reason, "
+                "layer, verification_priority, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (session_id, from_node, to_node, edge_type, reason,
+                 layer, verification_priority, now),
             )
             self._touch_session(conn, session_id=session_id, now=now)
             return cursor.lastrowid
+
+    def set_edge_layer(
+        self,
+        *,
+        session_id: str,
+        edge_id: int,
+        layer: str | None,
+        now: str,
+    ) -> None:
+        """Set or clear an edge's proof-tree ``layer`` (#42).
+
+        ``layer=None`` retracts the edge from the discipline (out of scope).
+        Raises ValueError on an unknown edge or an out-of-taxonomy value.
+        """
+        if layer is not None and layer not in self.EDGE_LAYERS:
+            raise ValueError(
+                f"layer {layer!r} not in {sorted(self.EDGE_LAYERS)}"
+            )
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE edges SET layer = ? WHERE session_id = ? AND id = ?",
+                (layer, session_id, edge_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(
+                    f"edge_id {edge_id!r} not found in session {session_id!r}"
+                )
+            self._touch_session(conn, session_id=session_id, now=now)
+
+    def set_edge_verification_priority(
+        self,
+        *,
+        session_id: str,
+        edge_id: int,
+        verification_priority: str | None,
+        now: str,
+    ) -> None:
+        """Set or clear an edge's ``verification_priority`` (#42).
+
+        ``verification_priority=None`` drops the edge's queue pressure.
+        Raises ValueError on an unknown edge or an out-of-taxonomy value.
+        """
+        if (verification_priority is not None
+                and verification_priority not in self.VERIFICATION_PRIORITIES):
+            raise ValueError(
+                f"verification_priority {verification_priority!r} not in "
+                f"{sorted(self.VERIFICATION_PRIORITIES)}"
+            )
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE edges SET verification_priority = ? "
+                "WHERE session_id = ? AND id = ?",
+                (verification_priority, session_id, edge_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(
+                    f"edge_id {edge_id!r} not found in session {session_id!r}"
+                )
+            self._touch_session(conn, session_id=session_id, now=now)
+
+    def record_edge_verification(
+        self,
+        *,
+        session_id: str,
+        edge_id: int,
+        verified_by: str | None,
+        method: str | None,
+        verdict: str,
+        notes: str | None,
+        prompt_hash: str | None,
+        now: str,
+    ) -> int:
+        """Append an external-verification record for an edge (#42).
+
+        ``verdict`` must be in ``VERIFICATION_VERDICTS``. The edge must exist
+        in the session. Append-only (1:many) — re-verification adds rows
+        rather than overwriting, preserving history.
+        """
+        if verdict not in self.VERIFICATION_VERDICTS:
+            raise ValueError(
+                f"verdict {verdict!r} not in {sorted(self.VERIFICATION_VERDICTS)}"
+            )
+        with self.connect() as conn:
+            edge = conn.execute(
+                "SELECT 1 FROM edges WHERE session_id = ? AND id = ?",
+                (session_id, edge_id),
+            ).fetchone()
+            if edge is None:
+                raise ValueError(
+                    f"edge_id {edge_id!r} not found in session {session_id!r}"
+                )
+            cursor = conn.execute(
+                "INSERT INTO edge_verifications "
+                "(edge_id, verified_by, verified_at, method, verdict, notes, "
+                "prompt_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (edge_id, verified_by, now, method, verdict, notes, prompt_hash),
+            )
+            self._touch_session(conn, session_id=session_id, now=now)
+            return cursor.lastrowid
+
+    def list_edge_verifications(
+        self,
+        *,
+        session_id: str,
+        edge_id: int,
+    ) -> list[sqlite3.Row]:
+        """Return all verification records for an edge, oldest first."""
+        with self.connect() as conn:
+            return list(conn.execute(
+                "SELECT v.* FROM edge_verifications v "
+                "JOIN edges e ON e.id = v.edge_id "
+                "WHERE e.session_id = ? AND v.edge_id = ? "
+                "ORDER BY v.id",
+                (session_id, edge_id),
+            ))
+
+    def list_unverified_edges(
+        self,
+        *,
+        session_id: str,
+        verification_priority: str | None = None,
+    ) -> list[sqlite3.Row]:
+        """Return necessary edges that have no verification record (#42).
+
+        The verification obligation is edge-local and keyed off
+        ``layer = 'necessary'`` (NOT merely a non-NULL layer): selective and
+        invalid edges carry no obligation. Ordered by verification_priority
+        (critical → standard → low → unset), then edge id. Optionally
+        restricted to a single priority bucket.
+        """
+        sql = (
+            "SELECT * FROM edges e "
+            "WHERE e.session_id = ? AND e.layer = 'necessary' "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM edge_verifications v WHERE v.edge_id = e.id"
+            ") "
+        )
+        params: list[Any] = [session_id]
+        if verification_priority is not None:
+            sql += "AND e.verification_priority = ? "
+            params.append(verification_priority)
+        sql += (
+            "ORDER BY CASE e.verification_priority "
+            "  WHEN 'critical' THEN 0 WHEN 'standard' THEN 1 "
+            "  WHEN 'low' THEN 2 ELSE 3 END, e.id"
+        )
+        with self.connect() as conn:
+            return list(conn.execute(sql, params))
 
     def delete_edge(
         self,
