@@ -137,7 +137,7 @@ The basic per-session rhythm: **set the anchor → observe the conversation → 
 | --- | --- |
 | `/dpd` | Start tracking decisions, or resume an existing session |
 | `/dpd-status` | "Where are we?" snapshot — active roots, focus, Pool items, mode |
-| `/dpd-dump` | Full graph as tree or Mermaid diagram |
+| `/dpd-dump` | Full graph as JSON-formatted YAML |
 | `/dpd-summary-md` | Extract decided/closed items into a markdown summary |
 | `/dpd-edit <id>` | Manual edit when you want direct control |
 | `/dpd-import <file>` | Import a prose/spec/graph doc as an archived subgraph |
@@ -154,7 +154,7 @@ The basic per-session rhythm: **set the anchor → observe the conversation → 
 
 ### Detailed examples
 
-Walked-through use cases — actual graphs built with the real MCP tools, transcripts and Mermaid included — live in [`docs/examples.md`](docs/examples.md):
+Walked-through use cases — actual graphs built with the real MCP tools, transcripts and YAML exports included — live in [`docs/examples.md`](docs/examples.md):
 
 1. **Decide a monetization model** — multiple hypotheses → evidence → decision with the rejected alternatives preserved.
 2. **Narrow a vague service idea into a minimum spec** — End-narrowing pressure forces "I want to build an app" down to a concrete first-version spec with explicit non-goals.

@@ -1,6 +1,6 @@
 # DPD — detailed examples
 
-Worked examples showing how a DPD session actually plays out. Each example is reproducible — the graphs shown here were built by running the actual MCP tools, then exported with `export_mermaid`.
+Worked examples showing how a DPD session actually plays out. Each example is reproducible — the graphs shown here were built by running the actual MCP tools. The diagrams below are hand-drawn illustrations of the resulting structure; the canonical machine-readable dump is `export_yaml` (see [`/dpd-dump`](../core/skills/dpd-dump/SKILL.md)).
 
 For the protocol concept and lifecycle, see [`concept.md`](concept.md). For the command cheatsheet, see the top-level [`README.md`](../README.md).
 

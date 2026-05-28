@@ -7,6 +7,32 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-05-28
+
+Drops graph-image output. As DPD graphs grew (multi-root, cross-root edges),
+Mermaid's flat auto-layout stopped scaling and rendered cross-root edges as
+second-class dotted arrows. Rather than chase a heavier renderer now, the
+visual export is removed and **`export_yaml` becomes the single graph dump** —
+every node and edge is first-class structured data (no dotted/second-class
+distinction). A scalable cluster-aware renderer (e.g. Graphviz DOT) may return
+later as a new export if needed.
+
+### BREAKING CHANGES
+
+- **`export_mermaid` MCP tool removed.** Use `export_yaml` (JSON-formatted,
+  `json.loads` round-trippable) for graph dumps. 38 MCP tools total (was 39).
+  The `/dpd-dump` skill is now YAML-only (the `--format=mermaid` option is
+  gone); `--root=<id>` still scopes the dump.
+
+### Changed
+
+- `/dpd` SKILL.md: §3.4 initial-proposal format and §4.5 pause-proposal
+  rationale no longer reference Mermaid — the hierarchical text outline is the
+  human-facing format; `export_yaml` is the authoritative machine-readable one.
+- Docs/READMEs updated to drop `export_mermaid` references. Small hand-authored
+  illustration diagrams in `docs/concept.md` / `docs/examples.md` are retained
+  as documentation (they are not tool output).
+
 ## [0.6.0] — 2026-05-28
 
 Adds **proof-tree discipline** (#42): an optional, opt-in rigor mode that
