@@ -33,7 +33,7 @@ That registers this repo as a Claude Code marketplace and installs the `dpd` plu
 - The MCP server (`dpd-mcp-server`), with venv lazy-bootstrapped on first session
 - A SessionStart hook that keeps the venv in sync with the plugin's bundled Python package
 
-Plugin body lives at `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (concretely: `~/.claude/plugins/cache/agent-dpd/dpd/0.4.0/`); persistent venv at `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (concretely: `~/.claude/plugins/data/dpd-agent-dpd/.venv/`). The venv path is what Claude Code passes as `${CLAUDE_PLUGIN_DATA}` to the SessionStart hook.
+Plugin body lives at `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (concretely: `~/.claude/plugins/cache/agent-dpd/dpd/0.5.0/`); persistent venv at `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (concretely: `~/.claude/plugins/data/dpd-agent-dpd/.venv/`). The venv path is what Claude Code passes as `${CLAUDE_PLUGIN_DATA}` to the SessionStart hook.
 
 To update: `/plugin update dpd` (or rely on Claude Code's auto-update) — this updates the plugin's bundled source, and the SessionStart hook will rebuild the venv on the next session via its pyproject.toml-hash check. Do **not** `pip install -U dpd-mcp-server` inside the plugin's venv directly: the hook will not notice the manual upgrade (it only rebuilds on bundled-source changes), and the venv will silently desync from the plugin source. If you need a clean venv, delete `~/.claude/plugins/data/dpd-agent-dpd/.venv/` and restart Claude Code — the hook will rebuild it.
 

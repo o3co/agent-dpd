@@ -7,6 +7,62 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-28
+
+Issue-driven release: closes nine GitHub issues surfaced from v0.4.0 dogfood
+use (#3, #5, #10, #11, #12, #14, #31, #32, #33, #41). Adds a schema migration
+(v5 → v6), three new MCP tools, and a batch of skill-methodology refinements.
+
+### BREAKING CHANGES
+
+- **`add_edge` edge-type validation:** `add_edge` (and the `bulk_import_subgraph`
+  edge path) now reject any `type` outside the canonical vocabulary
+  (`derived_from`, `requires`, `blocks`, `supports`, `contradicts`,
+  `contributes_to`, `supersedes`, `qualifies`, `invalidates`) and reject
+  self-loops (`from_node == to_node`). Previously the type column was free-form.
+  Existing edges are untouched (validation runs only on insert), but callers
+  passing non-canonical types will now get a `ValueError`. (#10)
+
+### Schema migration (v5 → v6)
+
+- Adds `nodes.severity` (TEXT, nullable). Migration is additive and runs
+  automatically on `Storage.open()`; existing rows get `severity = NULL`.
+  Downgrade is not supported (forward-only, per the `0.x` policy). (#32)
+
+### Added
+
+- `delete_edge(session_id, edge_id)` — remove a mis-typed or stale edge without
+  dropping to sqlite SQL. (#10)
+- `purge_session(session_id)` — delete a finished session's row + roots + edge
+  back-refs after its subgraphs were `delete`-d (precondition: `idle`/null mode
+  and no nodes remain). `force_purge_session(session_id)` cascades the same
+  cleanup, bypassing preconditions, for emergency use. Pool items survive
+  (`origin_session_id` nulled). (#12)
+- `add_node` optional `severity` field (conventional values `logical` /
+  `surface` / `cosmetic`, free-form) for §4.5 grouping. (#32)
+- `export_mermaid` `max_label_chars` parameter — pass `null` to disable label
+  truncation for README/docs embeds; default stays 60. (#14)
+- Skill methodology: §4.5.1 severity-aware grouping, §4.5.2 sibling-granularity
+  check (skill-only, transient), §5.1.3 canonical subgraph layout, dpd-import
+  eager edge-pinning step, and a "hard rules vs permissive defaults" convention. (#33, #41, #43)
+
+### Changed
+
+- `find_similar` `matched_snippet` now comes from the FTS column that actually
+  matched the query (column `-1`), instead of always `anchor_text`. (#3)
+- §3.2.1 End narrowing now requires a **concrete partitioned split proposal** at
+  ≥6 `achievement_conditions`, not a dismissible "too wide" flag. (#41)
+- Narrative docs (`concept.md`, skill READMEs, SKILL.md) clarify that `/fcot` is
+  **stakes-based opt-in** — automatic only on high-stakes inferred nodes — rather
+  than a mandatory pipeline step. (#5)
+
+### Fixed
+
+- `mark_reached`: the "not reachable" error now names the canonical layout (End
+  must be a `parent_id` descendant of Start) and the recovery path; SKILL.md
+  §5.1.3 documents the requirement. Removes the routine `force_delete` workaround
+  that made #11's "emergency only" framing inaccurate. (#31, #11)
+
 ## [0.4.0] — 2026-05-25
 
 ### BREAKING CHANGES

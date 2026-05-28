@@ -1,4 +1,4 @@
-"""Migrate a v0.3.2-shaped DPD database (user_version=5) to v0.4 (user_version=6).
+"""Migrate a v0.3.2-shaped DPD database (user_version=5) to v0.5 (user_version=6).
 
 v6 adds:
   - nodes.severity (TEXT, NULLABLE) — optional proposer-assigned severity
@@ -58,7 +58,7 @@ def _cli(argv: list[str]) -> int:
         return 2
     db_path = argv[1]
     migrate(db_path=db_path)
-    print(f"Migrated {db_path} to v0.4 (user_version=6)")
+    print(f"Migrated {db_path} to v0.5 (user_version=6)")
     return 0
 
 

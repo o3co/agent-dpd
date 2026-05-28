@@ -1,4 +1,4 @@
-"""Migration from v0.3.2 schema (user_version=5) to v0.4 (user_version=6).
+"""Migration from v0.3.2 schema (user_version=5) to v0.5 (user_version=6).
 
 Adds: nodes.severity (TEXT, NULLABLE).
 """

@@ -33,7 +33,7 @@ Claude Code スキル + MCP サーバで実現します。
 - MCP サーバ (`dpd-mcp-server`)。初回セッション時に venv を自動構築します
 - プラグイン同梱の Python パッケージと venv を同期させる SessionStart フック
 
-プラグイン本体は `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (実際のパス: `~/.claude/plugins/cache/agent-dpd/dpd/0.4.0/`)、永続 venv は `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (実際のパス: `~/.claude/plugins/data/dpd-agent-dpd/.venv/`) に配置されます。venv パスは Claude Code が SessionStart フックに渡す `${CLAUDE_PLUGIN_DATA}` の実体です。
+プラグイン本体は `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (実際のパス: `~/.claude/plugins/cache/agent-dpd/dpd/0.5.0/`)、永続 venv は `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (実際のパス: `~/.claude/plugins/data/dpd-agent-dpd/.venv/`) に配置されます。venv パスは Claude Code が SessionStart フックに渡す `${CLAUDE_PLUGIN_DATA}` の実体です。
 
 更新するには `/plugin update dpd` を実行するか、Claude Code の自動更新に任せます。これでプラグイン同梱ソースが更新され、次セッションの SessionStart フックが pyproject.toml ハッシュ変化を検出して venv を再ビルドします。プラグインの venv 内で直接 `pip install -U dpd-mcp-server` を **実行しないでください**: フックはこの手動更新を検出できず (バンドルソース変化時のみ再ビルド)、venv が同梱ソースと静かに desync します。venv をクリーンにしたい場合は `~/.claude/plugins/data/dpd-agent-dpd/.venv/` を削除して Claude Code を再起動すれば、フックが再ビルドします。
 
