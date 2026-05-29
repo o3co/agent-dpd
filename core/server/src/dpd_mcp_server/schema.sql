@@ -156,4 +156,35 @@ CREATE VIRTUAL TABLE IF NOT EXISTS subgraphs_fts USING fts5(
     tokenize = 'trigram'
 );
 
-PRAGMA user_version = 7;
+-- v8 (#55): note layer. Anchored long-form narrative — the residue that
+-- cannot be structured into the graph (decisions/relations belong in nodes
+-- and edges; notes hold the prose that survives extraction). Anchors are
+-- polymorphic over nodes OR roots(=subgraph), so anchor_id has no FK; anchor
+-- existence is validated in app code (Storage.add_note), mirroring add_edge.
+-- The anchor_kind / kind / state CHECKs live here for fresh DBs; ALTER-upgraded
+-- DBs enforce the closed taxonomies in app code (Storage.add_note).
+CREATE TABLE IF NOT EXISTS notes (
+    id           TEXT PRIMARY KEY,
+    session_id   TEXT NOT NULL REFERENCES sessions(id),
+    anchor_kind  TEXT NOT NULL CHECK (anchor_kind IN ('node','root')),
+    anchor_id    TEXT NOT NULL,
+    kind         TEXT NOT NULL CHECK (kind IN (
+        'narrative','caveat','external-analysis','rejected-alternative'
+    )),
+    text         TEXT NOT NULL,
+    state        TEXT NOT NULL DEFAULT 'active'
+        CHECK (state IN ('active','archived')),
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+-- At most one active note per (anchor, kind): the canonicality invariant that
+-- makes the note layer SoT (a second active note on the same axis is a smell).
+-- All indexed columns + state are NOT NULL, so SQLite's "NULLs are distinct"
+-- rule cannot punch a hole in this partial unique index.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_notes_active_anchor_kind
+    ON notes(anchor_kind, anchor_id, kind) WHERE state = 'active';
+CREATE INDEX IF NOT EXISTS idx_notes_anchor
+    ON notes(session_id, anchor_kind, anchor_id);
+
+PRAGMA user_version = 8;

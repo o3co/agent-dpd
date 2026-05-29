@@ -9,6 +9,41 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 - **Install moved to the shared [`agent-market`](https://github.com/o3co/agent-market) marketplace.** Use `/plugin marketplace add https://github.com/o3co/agent-market.git` then `/plugin install dpd@agent-market` (alongside `fcot`). Removed this repo's self-marketplace manifest (`.claude-plugin/marketplace.json`) — `agent-market` is now the canonical discovery source; `packaging/claude-code` (the plugin itself) is unchanged. README / AGENTS updated; install paths now resolve under `cache/agent-market/...`. No version bump (docs/packaging only).
 
+## [0.9.0] — 2026-05-29
+
+First slice of the **note layer** (#55): anchored long-form narrative, so the
+source of truth is `graph + notes` rather than `graph + an evaporating
+conversation`. Structure (decisions, relations, verdicts) still belongs in
+nodes/edges; notes hold only the residue that cannot be structured without
+loss. Frontier-independent and self-contained (the evolution/frontier
+mechanism remains #16). Schema bumps `user_version` 7 → 8.
+
+### Added
+
+- **`notes` table** (#55) — anchored to a node OR a root (= subgraph), with a
+  closed `kind` vocabulary (`narrative` / `caveat` / `external-analysis` /
+  `rejected-alternative`). A partial unique index enforces **at most one active
+  note per `(anchor_kind, anchor_id, kind)`** — the canonicality invariant that
+  makes the layer a source of truth. Anchor existence is validated in app code
+  (polymorphic anchor, no FK), mirroring `add_edge`.
+- **MCP tools `add_note` / `list_notes`** + `Storage.add_note` / `list_notes`.
+  `add_note` grows by append-only **supersession**: adding a note on an axis
+  that already has an active one archives the old (returned as
+  `superseded_note_id`) and inserts the new. `list_notes` filters by anchor
+  (both `anchor_kind`+`anchor_id` or neither) and/or `kind`, and walks history
+  with `include_archived`.
+- **`migrate_v7_to_v8`** — creates `notes` + indexes on upgraded databases;
+  idempotent, transactional, mirrors the established migration pattern.
+
+### Changed
+
+- **Physical-delete paths cascade to notes** so no note outlives its anchor:
+  `force_delete_node` and `delete_subgraph` drop notes anchored to the deleted
+  node(s); `purge_session` / `force_purge_session` clear all session notes
+  before the session row is removed (the `notes.session_id` FK would otherwise
+  fail the purge — including root-anchored notes the no-nodes precondition
+  would leave behind).
+
 ## [0.8.0] — 2026-05-29
 
 Refines the overloaded `supports` edge into precise, axis-tagged relations so
