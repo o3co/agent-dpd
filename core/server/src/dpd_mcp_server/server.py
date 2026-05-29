@@ -404,8 +404,17 @@ async def list_tools() -> list[types.Tool]:
                 "Insert an edge between two nodes. Edge type is restricted to "
                 "the canonical vocabulary (derived_from, requires, blocks, "
                 "supports, contradicts, contributes_to, supersedes, qualifies, "
-                "invalidates). Self-loops (from_node == to_node) are rejected. "
-                "Use delete_edge to remove a mis-typed or stale edge."
+                "invalidates, instantiates, illustrates, justifies). Self-loops "
+                "(from_node == to_node) are rejected. Use delete_edge to remove "
+                "a mis-typed or stale edge.\n"
+                "#57 refinements of the overloaded 'supports' (directional, "
+                "from -> to): 'instantiates' = concrete artifact (formula/code/"
+                "example) realizes an abstract claim (realization axis); "
+                "'illustrates' = example/scenario demonstrates a claim "
+                "(realization axis); 'justifies' = rationale grounds a claim, "
+                "i.e. removing it leaves the claim without premise (grounding "
+                "axis). 'supports' is retained as the generic / not-yet-refined "
+                "edge."
             ),
             inputSchema={
                 "type": "object",
@@ -420,6 +429,7 @@ async def list_tools() -> list[types.Tool]:
                             "derived_from", "requires", "blocks", "supports",
                             "contradicts", "contributes_to", "supersedes",
                             "qualifies", "invalidates",
+                            "instantiates", "illustrates", "justifies",
                         ],
                     },
                     "reason": {"type": ["string", "null"]},
