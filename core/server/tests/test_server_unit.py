@@ -143,6 +143,8 @@ def test_add_edge_schema_enumerates_canonical_types() -> None:
     assert set(enum) == {
         "derived_from", "requires", "blocks", "supports", "contradicts",
         "contributes_to", "supersedes", "qualifies", "invalidates",
+        # #57: realization-axis (instantiates/illustrates) + grounding (justifies)
+        "instantiates", "illustrates", "justifies",
     }
 
 

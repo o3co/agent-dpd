@@ -625,6 +625,11 @@ def export_yaml(
                 "to": edge["to_node"],
                 "type": edge["type"],
                 "reason": edge["reason"],
+                # #57/#42: carry proof-tree discipline so a load-bearing edge
+                # (e.g. justifies + layer='necessary') round-trips, rather than
+                # decaying to a plain edge on re-import.
+                "layer": edge["layer"],
+                "verification_priority": edge["verification_priority"],
             })
 
     payload = {

@@ -811,6 +811,37 @@ def test_export_yaml_includes_edges(storage: Storage) -> None:
     assert "derived_from" in out
 
 
+def test_export_yaml_edge_includes_layer_and_priority(storage: Storage) -> None:
+    """#57: a load-bearing edge's layer + verification_priority must survive
+    export so proof-tree discipline round-trips, not just type/reason."""
+    import json as _json
+    storage.insert_session(
+        session_id="ses_x", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_x", session_id="ses_x", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="rn", session_id="ses_x", node_type="rationale", text="r",
+        parent_id="root_x", parent_kind="root", now="2026-05-20T10:01:00Z",
+    )
+    storage.insert_node(
+        node_id="dn", session_id="ses_x", node_type="decision", text="d",
+        parent_id="root_x", parent_kind="root", now="2026-05-20T10:01:00Z",
+    )
+    storage.add_edge(
+        session_id="ses_x", from_node="rn", to_node="dn",
+        edge_type="justifies", reason=None, now="2026-05-20T11:00:00Z",
+        layer="necessary", verification_priority="critical",
+    )
+
+    out = export_yaml(storage=storage, arguments={"session_id": "ses_x"})["yaml"]
+    edge = next(e for e in _json.loads(out)["edges"] if e["type"] == "justifies")
+    assert edge["layer"] == "necessary"
+    assert edge["verification_priority"] == "critical"
+
+
 def test_export_yaml_round_trip_through_json(storage: Storage) -> None:
     """YAML output is JSON-compatible (json is a YAML subset), so it must
     parse with the stdlib json module."""
@@ -2002,6 +2033,64 @@ def test_bulk_import_creates_edges(tmp_db_path: str) -> None:
     assert len(result["imported_edges"]) == 2
     all_edges = storage.list_edges(session_id=sid)
     assert len(all_edges) == 2
+
+
+def test_bulk_import_round_trips_edge_layer_and_priority(tmp_db_path: str) -> None:
+    """#57: bulk_import must accept layer + verification_priority on edges so a
+    load-bearing justifies edge round-trips with its proof-tree discipline."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "rn", "type": "rationale", "text": "r", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        {"id": "dn", "type": "decision", "text": "d", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+    ]
+    edges = [
+        {"from": "rn", "to": "dn", "type": "justifies", "reason": None, "layer": "necessary", "verification_priority": "critical"},
+    ]
+    t.bulk_import_subgraph(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": edges},
+        now="2026-05-22T10:01:00Z",
+    )
+
+    rows = storage.list_edges(session_id=sid, edge_type="justifies")
+    assert len(rows) == 1
+    assert rows[0]["layer"] == "necessary"
+    assert rows[0]["verification_priority"] == "critical"
+
+
+def test_bulk_import_supports_edge_without_discipline_is_non_breaking(
+    tmp_db_path: str,
+) -> None:
+    """#57 non-breaking: a pre-#57 edge spec (no layer / verification_priority
+    keys) still imports as the generic 'supports' edge, with NULL discipline
+    fields. The new optional fields must not break old payloads."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        {"id": "n2", "type": "answer", "text": "A", "parent_id": "n1", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+    ]
+    edges = [
+        {"from": "n2", "to": "n1", "type": "supports", "reason": "old-style"},
+    ]
+    t.bulk_import_subgraph(
+        storage=storage,
+        arguments={"session_id": sid, "root_id": rid, "nodes": nodes, "edges": edges},
+        now="2026-05-22T10:01:00Z",
+    )
+
+    rows = storage.list_edges(session_id=sid, edge_type="supports")
+    assert len(rows) == 1
+    assert rows[0]["reason"] == "old-style"
+    assert rows[0]["layer"] is None
+    assert rows[0]["verification_priority"] is None
+    # supports stays generic / unclassified — not silently promoted to an axis.
+    assert Storage.edge_axis(rows[0]["type"]) == "unclassified"
 
 
 def test_bulk_import_rolls_back_on_fk_failure(tmp_db_path: str) -> None:

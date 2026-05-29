@@ -9,6 +9,37 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 - **Install moved to the shared [`agent-market`](https://github.com/o3co/agent-market) marketplace.** Use `/plugin marketplace add https://github.com/o3co/agent-market.git` then `/plugin install dpd@agent-market` (alongside `fcot`). Removed this repo's self-marketplace manifest (`.claude-plugin/marketplace.json`) — `agent-market` is now the canonical discovery source; `packaging/claude-code` (the plugin itself) is unchanged. README / AGENTS updated; install paths now resolve under `cache/agent-market/...`. No version bump (docs/packaging only).
 
+## [0.8.0] — 2026-05-29
+
+Refines the overloaded `supports` edge into precise, axis-tagged relations so
+fine-grained spec graphs keep query precision and decision-trace fidelity
+(#57). Non-breaking: existing `supports` edges are untouched.
+
+### Added
+
+- **Edge types `instantiates`, `illustrates`, `justifies`** (#57). They split
+  the three meanings that previously collapsed onto `supports`:
+  `instantiates` (concrete → abstract, *realization* axis), `illustrates`
+  (example → claim, *realization* axis), `justifies` (rationale → claim,
+  *grounding* axis). `supports` is retained as the generic / not-yet-refined
+  edge. `add_edge` and the MCP `add_edge` schema accept all three.
+- **`Storage.edge_axis(type)` accessor + `EDGE_TYPE_AXES` registry** — maps an
+  edge type to its semantic axis (`realization` / `grounding` /
+  `unclassified`). Code-defined and read-only; the axis is a pure function of
+  the type and is never serialized. Only the new types are classified; the
+  pre-existing vocabulary stays `unclassified` (full taxonomy deferred).
+
+### Changed
+
+- **`resolve_branch` / `resolve_hypothesis_branch` auto-create a `justifies`
+  edge** (rationale → decision) when a rationale is provided, so rationales
+  created through the first-class resolution path are visible to grounding
+  queries — not only those added via explicit `add_edge`.
+- **`export_yaml` and `bulk_import_subgraph` now carry edge `layer` +
+  `verification_priority`** so a load-bearing edge (e.g. `justifies` +
+  `layer='necessary'`) round-trips with its proof-tree discipline (#42)
+  intact instead of decaying to a plain edge on re-import.
+
 ## [0.7.0] — 2026-05-28
 
 Drops graph-image output. As DPD graphs grew (multi-root, cross-root edges),

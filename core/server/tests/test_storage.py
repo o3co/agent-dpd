@@ -841,6 +841,45 @@ def test_add_edge_canonical_vocabulary_accepted(tmp_db_path: str) -> None:
     assert {r["type"] for r in rows} == set(canonical)
 
 
+def test_add_edge_accepts_realization_and_grounding_types(tmp_db_path: str) -> None:
+    """#57: the overloaded ``supports`` is refined into realization-axis types
+    (``instantiates``, ``illustrates``) and a grounding-axis type
+    (``justifies``). All three must be accepted by add_edge."""
+    storage = Storage.open(tmp_db_path)
+    _seed_two_endpoints(storage)
+
+    new_types = ("instantiates", "illustrates", "justifies")
+    for i, t in enumerate(new_types):
+        storage.add_edge(
+            session_id="ses_1",
+            from_node="n1", to_node="n2",
+            edge_type=t, reason=None,
+            now=f"2026-05-20T12:{i:02d}:00Z",
+        )
+    rows = storage.list_edges(session_id="ses_1")
+    assert {r["type"] for r in rows} == set(new_types)
+
+
+def test_edge_axis_classifies_realization_and_grounding() -> None:
+    """#57: edge_axis() maps an edge type to its semantic axis. Only the new
+    refinements are classified now; everything else is 'unclassified' (the
+    full taxonomy is deferred to the Traverser work)."""
+    assert Storage.edge_axis("instantiates") == "realization"
+    assert Storage.edge_axis("illustrates") == "realization"
+    assert Storage.edge_axis("justifies") == "grounding"
+
+
+def test_edge_axis_unclassified_for_existing_and_unknown() -> None:
+    """Existing types and unknown strings are 'unclassified', not an error.
+
+    A partially-populated registry must answer for every input so callers
+    never have to special-case missing keys."""
+    assert Storage.edge_axis("supports") == "unclassified"
+    assert Storage.edge_axis("requires") == "unclassified"
+    assert Storage.edge_axis("derived_from") == "unclassified"
+    assert Storage.edge_axis("nonexistent_type") == "unclassified"
+
+
 def test_delete_edge_removes_edge(tmp_db_path: str) -> None:
     """Issue #10: delete_edge must remove an edge by id and touch the session."""
     storage = Storage.open(tmp_db_path)
@@ -1371,6 +1410,80 @@ def test_resolve_hypothesis_branch_without_rationale(tmp_db_path: str) -> None:
 
     assert result["rationale_id"] is None
     assert storage.get_node(session_id="ses_1", node_id="d1") is not None
+
+
+def test_resolve_hypothesis_branch_creates_justifies_edge_from_rationale(
+    tmp_db_path: str,
+) -> None:
+    """#57: a rationale grounds the decision. resolve_hypothesis_branch must
+    emit a ``justifies`` edge (rationale -> decision) so grounding queries see
+    rationales created through the first-class resolution path."""
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    result = storage.resolve_hypothesis_branch(
+        session_id="ses_1", hyp_id="h2",
+        decision_id="d1", decision_text="adopt h2",
+        rationale_id="r1", rationale_text="best fit",
+        now="2026-05-20T11:00:00Z",
+    )
+
+    assert isinstance(result["justifies_edge_id"], int)
+    edges = storage.list_edges(session_id="ses_1", edge_type="justifies")
+    assert len(edges) == 1
+    assert edges[0]["from_node"] == "r1"  # rationale
+    assert edges[0]["to_node"] == "d1"    # decision (the claim)
+
+
+def test_resolve_hypothesis_branch_no_justifies_edge_without_rationale(
+    tmp_db_path: str,
+) -> None:
+    storage = Storage.open(tmp_db_path)
+    _seed_hypothesis_branch(storage)
+
+    result = storage.resolve_hypothesis_branch(
+        session_id="ses_1", hyp_id="h1",
+        decision_id="d1", decision_text="adopt h1",
+        rationale_id=None, rationale_text=None,
+        now="2026-05-20T11:00:00Z",
+    )
+
+    assert result["justifies_edge_id"] is None
+    assert storage.list_edges(session_id="ses_1", edge_type="justifies") == []
+
+
+def test_resolve_branch_creates_justifies_edge_from_rationale(
+    tmp_db_path: str,
+) -> None:
+    """#57: resolve_branch must emit the same rationale -> decision
+    ``justifies`` grounding edge when a rationale is provided."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(
+        session_id="ses_1", scope=None, label=None, now="2026-05-20T10:00:00Z"
+    )
+    storage.insert_root(
+        root_id="root_a", session_id="ses_1", topic="t",
+        now="2026-05-20T10:00:00Z",
+    )
+    storage.insert_node(
+        node_id="c1", session_id="ses_1", node_type="question",
+        text="q", parent_id="root_a", parent_kind="root",
+        now="2026-05-20T10:01:00Z",
+    )
+
+    storage.resolve_branch(
+        session_id="ses_1", parent_id="root_a", parent_kind="root",
+        results=[{"node_id": "c1", "closure_reason": "resolved"}],
+        decision_id="d1", decision_text="decide",
+        rationale_id="r1", rationale_text="because",
+        derived_from_node_ids=None,
+        now="2026-05-20T11:00:00Z",
+    )
+
+    edges = storage.list_edges(session_id="ses_1", edge_type="justifies")
+    assert len(edges) == 1
+    assert edges[0]["from_node"] == "r1"
+    assert edges[0]["to_node"] == "d1"
 
 
 def test_resolve_hypothesis_branch_raises_when_target_missing(tmp_db_path: str) -> None:

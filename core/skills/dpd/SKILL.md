@@ -582,8 +582,8 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `spawn_root(session_id, topic, reason?)` | Create new root topic → `{root: {...}}` (full row). |
 | `add_node(session_id, parent_id, type, text, paired_for?, achievement_conditions?, provenance?, state?, severity?)` | Add child node. **[v0.3.1]** `provenance` ∈ `'grounded'`/`'inferred'`/`'imported'`/`'manual'` (default `'grounded'`). `state` allows `'archived'` for `/dpd-import` use. End nodes require `paired_for=<start_node_id>`. **[v0.4]** `severity` is optional proposer-assigned classification (conventional values: `'logical'`/`'surface'`/`'cosmetic'`) used by §4.5 grouping. |
 | `close_node(session_id, node_id, closure_reason)` | Mark resolved / rejected / invalidated. |
-| `resolve_hypothesis_branch(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + auto-insert `derived_from` edge (decision → accepted hypothesis) + insert rationale if any. |
-| `resolve_branch(session_id, parent_id, parent_kind, results, decision_text?, rationale_text?, derived_from_node_ids?)` | Atomically close N sibling nodes with per-node closure_reason. Generic counterpart to `resolve_hypothesis_branch`. |
+| `resolve_hypothesis_branch(session_id, hyp_id, decision_text, rationale_text?)` | **Atomic**: close target resolved + open siblings rejected + insert decision + auto-insert `derived_from` edge (decision → accepted hypothesis) + insert rationale if any + auto-insert `justifies` edge (rationale → decision) when a rationale is given (#57). |
+| `resolve_branch(session_id, parent_id, parent_kind, results, decision_text?, rationale_text?, derived_from_node_ids?)` | Atomically close N sibling nodes with per-node closure_reason. Generic counterpart to `resolve_hypothesis_branch`; also auto-inserts the rationale → decision `justifies` edge when a rationale is given (#57). |
 | `set_focus(session_id, node_id?)` | Set/clear `focus_node_id`. Pass `node_id=null` to clear. Accepts regular node id or root_id. |
 | `set_root_lifecycle(session_id, root_id, lifecycle)` | Transition `active` ↔ `archived` ↔ `deferred`. |
 | `list_open_nodes(session_id, root_id?, state?)` | Open nodes in session or within one root. `state` filter narrows by node state string. |
@@ -636,7 +636,10 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 |---|---|---|
 | `derived_from` | derived → source | Decision/evidence derived from earlier node (e.g., `decision → hypothesis`) |
 | `requires` | requirer → required | Hard dependency relation (distinct from `blocks` which is phase-ordering) |
-| `supports` | supporter → supported | Evidence supports a decision/hypothesis |
+| `supports` | supporter → supported | Generic / not-yet-refined support. Prefer the precise `instantiates` / `illustrates` / `justifies` below when the relation is clear |
+| `instantiates` | concrete → abstract | Concrete artifact (formula/code/example) realizes an abstract claim (#57, realization axis) |
+| `illustrates` | example → claim | Example/scenario demonstrates a claim's behavior (#57, realization axis) |
+| `justifies` | rationale → claim | Rationale grounds a claim — removing it leaves the claim without premise (#57, grounding axis) |
 | `contradicts` | contradictor → contradicted | Observation contradicts a decision/hypothesis |
 | `qualifies` | qualifier → qualified | Finding limits or scopes a target without overturning it |
 | `invalidates` | invalidator → invalidated | Finding shows target's premise no longer holds |
@@ -645,6 +648,8 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `supersedes` | new → old | New subgraph supersedes an older one (monotonic forward-only) |
 
 **Direction rule**: from-side is the "active" side (supporting, contradicting, deriving); to-side is the target.
+
+**Semantic axis [#57]**: `instantiates` / `illustrates` carry the *realization* axis (concrete realizes/exemplifies abstract), `justifies` the *grounding* axis (premise → claim). The remaining types are currently `unclassified` — the full axis taxonomy is deferred. The axis is a pure function of the type (queryable via `Storage.edge_axis(type)`), never stored on the edge. Refining `supports` into these did **not** migrate existing `supports` edges — they remain generic, non-breaking.
 
 **Extending the vocabulary** is a deliberate spec change — propose a new type with use case and direction rule in an issue rather than introducing it ad-hoc. Free-form types would fragment cross-session semantics (e.g., `find_similar` retrieval, `list_unblocked_open_nodes` queries).
 

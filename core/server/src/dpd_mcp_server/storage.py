@@ -547,7 +547,37 @@ class Storage:
     EDGE_TYPES = frozenset({
         "derived_from", "requires", "blocks", "supports", "contradicts",
         "contributes_to", "supersedes", "qualifies", "invalidates",
+        # #57: the overloaded ``supports`` is refined into precise relations.
+        # Directional contracts (from -> to):
+        #   instantiates: concrete artifact -> abstract claim (realization axis)
+        #   illustrates:  example/scenario  -> claim          (realization axis)
+        #   justifies:    rationale         -> claim          (grounding axis)
+        # ``supports`` is retained as the generic / not-yet-refined edge.
+        "instantiates", "illustrates", "justifies",
     })
+
+    # #57: a code-defined (read-only) registry tagging an edge type with the
+    # semantic axis it lives on. Only the new refinements are classified for
+    # now; the full taxonomy of the pre-existing types is deferred to the
+    # Traverser / named-policy work, so they answer ``unclassified``. The axis
+    # is a pure function of the type (never serialized) and is the public
+    # contract for the axis concept; consume it via ``edge_axis()`` rather than
+    # reading this dict directly.
+    EDGE_TYPE_AXES = {
+        "instantiates": "realization",
+        "illustrates": "realization",
+        "justifies": "grounding",
+    }
+
+    @classmethod
+    def edge_axis(cls, edge_type: str) -> str:
+        """Return the semantic axis of ``edge_type``.
+
+        One of ``"realization"`` / ``"grounding"`` for classified types, else
+        ``"unclassified"``. Answers for every input (including unknown
+        strings) so callers never special-case missing keys.
+        """
+        return cls.EDGE_TYPE_AXES.get(edge_type, "unclassified")
 
     # #42 proof-tree discipline. layer = epistemic status of an edge,
     # orthogonal to type. verification verdicts come from /dpd-verify-edge.
@@ -898,6 +928,7 @@ class Storage:
             )
             derived_from_edge_id = edge_cursor.lastrowid
 
+            justifies_edge_id: int | None = None
             if rationale_id is not None and rationale_text is not None:
                 conn.execute(
                     "INSERT INTO nodes "
@@ -908,6 +939,17 @@ class Storage:
                     (rationale_id, session_id, rationale_text,
                      decision_id, now, now),
                 )
+                # #57: the rationale grounds the decision. Emit a 'justifies'
+                # edge (rationale -> decision/claim) so grounding queries find
+                # rationales created via the first-class resolution path, not
+                # only those added with an explicit add_edge.
+                j_cursor = conn.execute(
+                    "INSERT INTO edges "
+                    "(session_id, from_node, to_node, type, reason, created_at) "
+                    "VALUES (?, ?, ?, 'justifies', NULL, ?)",
+                    (session_id, rationale_id, decision_id, now),
+                )
+                justifies_edge_id = j_cursor.lastrowid
 
             self._touch_session(conn, session_id=session_id, now=now)
 
@@ -917,6 +959,7 @@ class Storage:
                 "rationale_id": rationale_id,
                 "closed_siblings": closed_siblings,
                 "derived_from_edge_id": derived_from_edge_id,
+                "justifies_edge_id": justifies_edge_id,
             }
 
     def resolve_branch(
@@ -1064,6 +1107,19 @@ class Storage:
                     (rationale_id, session_id, rationale_text,
                      decision_id, now, now),
                 )
+                # #57: rationale grounds the decision -> 'justifies' edge
+                # (rationale -> decision/claim). Appended to edges_created
+                # alongside any derived_from edges.
+                j_cur = conn.execute(
+                    "INSERT INTO edges "
+                    "(session_id, from_node, to_node, type, reason, created_at) "
+                    "VALUES (?, ?, ?, 'justifies', NULL, ?)",
+                    (session_id, rationale_id, decision_id, now),
+                )
+                j_row = conn.execute(
+                    "SELECT * FROM edges WHERE id = ?", (j_cur.lastrowid,)
+                ).fetchone()
+                edges_created.append({k: j_row[k] for k in j_row.keys()})
 
             self._touch_session(conn, session_id=session_id, now=now)
 
@@ -2304,11 +2360,31 @@ class Storage:
                 to_node = edge_spec["to"]
                 edge_type = edge_spec["type"]
                 reason = edge_spec.get("reason") or None
+                # #57/#42: accept proof-tree discipline so load-bearing edges
+                # round-trip (export emits these; without import support they
+                # would decay to plain edges).
+                layer = edge_spec.get("layer") or None
+                verification_priority = (
+                    edge_spec.get("verification_priority") or None
+                )
 
                 if edge_type not in self.EDGE_TYPES:
                     raise ValueError(
                         f"bulk_import: edge_type {edge_type!r} not in "
                         f"canonical vocabulary {sorted(self.EDGE_TYPES)}"
+                    )
+                if layer is not None and layer not in self.EDGE_LAYERS:
+                    raise ValueError(
+                        f"bulk_import: layer {layer!r} not in "
+                        f"{sorted(self.EDGE_LAYERS)}"
+                    )
+                if (verification_priority is not None
+                        and verification_priority
+                        not in self.VERIFICATION_PRIORITIES):
+                    raise ValueError(
+                        f"bulk_import: verification_priority "
+                        f"{verification_priority!r} not in "
+                        f"{sorted(self.VERIFICATION_PRIORITIES)}"
                     )
                 if from_node == to_node:
                     raise ValueError(
@@ -2335,9 +2411,11 @@ class Storage:
                 try:
                     cur = conn.execute(
                         "INSERT INTO edges "
-                        "(session_id, from_node, to_node, type, reason, created_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
-                        (session_id, from_node, to_node, edge_type, reason, now),
+                        "(session_id, from_node, to_node, type, reason, "
+                        " layer, verification_priority, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (session_id, from_node, to_node, edge_type, reason,
+                         layer, verification_priority, now),
                     )
                 except _sqlite3.IntegrityError as exc:
                     raise ValueError(

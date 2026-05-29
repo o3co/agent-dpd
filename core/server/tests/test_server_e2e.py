@@ -162,17 +162,18 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
         })
         assert active == {"roots": []}
 
-        # resolve_hypothesis_branch already created a derived_from edge
-        # decision → accepted hypothesis. Verify and add another distinct
-        # edge type to exercise add_edge / list_edges.
+        # resolve_hypothesis_branch (with rationale) auto-creates two edges:
+        #   - derived_from: decision → accepted hypothesis
+        #   - justifies (#57): rationale → decision (grounding)
         edges_after_resolve = call_tool(16, "list_edges", {
             "session_id": session_id,
         })
-        assert len(edges_after_resolve["edges"]) == 1
-        auto_edge = edges_after_resolve["edges"][0]
-        assert auto_edge["type"] == "derived_from"
-        assert auto_edge["from_node"] == accept_payload["decision_id"]
-        assert auto_edge["to_node"] == hyp_ids[1]
+        assert len(edges_after_resolve["edges"]) == 2
+        by_type = {e["type"]: e for e in edges_after_resolve["edges"]}
+        assert by_type["derived_from"]["from_node"] == accept_payload["decision_id"]
+        assert by_type["derived_from"]["to_node"] == hyp_ids[1]
+        assert by_type["justifies"]["from_node"] == accept_payload["rationale_id"]
+        assert by_type["justifies"]["to_node"] == accept_payload["decision_id"]
 
         # Add a manual "blocks" edge between two of the still-existing nodes.
         call_tool(17, "add_edge", {
@@ -181,8 +182,10 @@ def test_full_chain_through_stdio(tmp_path: Path) -> None:
             "type": "blocks",
         })
         all_edges = call_tool(18, "list_edges", {"session_id": session_id})
-        assert len(all_edges["edges"]) == 2
-        assert {e["type"] for e in all_edges["edges"]} == {"derived_from", "blocks"}
+        assert len(all_edges["edges"]) == 3
+        assert {e["type"] for e in all_edges["edges"]} == {
+            "derived_from", "justifies", "blocks",
+        }
 
         # export_yaml is JSON-compatible — re-parses cleanly.
         yaml_out = call_tool(20, "export_yaml", {
