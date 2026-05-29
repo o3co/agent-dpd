@@ -878,6 +878,107 @@ def test_export_yaml_filters_to_one_root(storage: Storage) -> None:
     assert "root_b" not in out
 
 
+def test_export_yaml_includes_active_notes_only(storage: Storage) -> None:
+    """#64: export must carry active notes (graph + notes is the SoT), but
+    NOT superseded/archived ones — export mirrors the current-frontier view."""
+    import json as _json
+    sid = _seed_small_decision_tree(storage)
+    storage.add_note(
+        session_id=sid, anchor_kind="node", anchor_id="h1",
+        kind="external-analysis", text="codex body v1",
+        note_id="note_e1", now="2026-05-20T12:00:00Z",
+    )
+    # Supersede it: note_e1 → archived, note_e2 → active.
+    storage.add_note(
+        session_id=sid, anchor_kind="node", anchor_id="h1",
+        kind="external-analysis", text="codex body v2",
+        note_id="note_e2", now="2026-05-20T12:05:00Z",
+    )
+    storage.add_note(
+        session_id=sid, anchor_kind="root", anchor_id="root_a",
+        kind="caveat", text="subgraph caveat",
+        note_id="note_r1", now="2026-05-20T12:06:00Z",
+    )
+
+    parsed = _json.loads(
+        export_yaml(storage=storage, arguments={"session_id": sid})["yaml"]
+    )
+
+    assert "notes" in parsed
+    by_id = {n["id"]: n for n in parsed["notes"]}
+    assert set(by_id) == {"note_e2", "note_r1"}  # active only; note_e1 excluded
+    assert by_id["note_e2"]["anchor_kind"] == "node"
+    assert by_id["note_e2"]["anchor_id"] == "h1"
+    assert by_id["note_e2"]["kind"] == "external-analysis"
+    assert by_id["note_e2"]["text"] == "codex body v2"
+    assert by_id["note_e2"]["state"] == "active"
+    assert by_id["note_r1"]["anchor_kind"] == "root"
+
+
+def test_export_yaml_notes_respect_root_filter(storage: Storage) -> None:
+    """#64: notes whose anchor is outside the filtered root are excluded,
+    mirroring the edge-visibility rule."""
+    import json as _json
+    sid = _seed_small_decision_tree(storage)
+    spawn_root(
+        storage=storage,
+        arguments={"session_id": sid, "topic": "Other"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "root_b",
+    )
+    storage.add_note(
+        session_id=sid, anchor_kind="node", anchor_id="h1",
+        kind="narrative", text="in scope", note_id="note_in",
+        now="2026-05-20T12:00:00Z",
+    )
+    storage.add_note(
+        session_id=sid, anchor_kind="root", anchor_id="root_b",
+        kind="narrative", text="out of scope", note_id="note_out",
+        now="2026-05-20T12:00:00Z",
+    )
+
+    parsed = _json.loads(export_yaml(
+        storage=storage, arguments={"session_id": sid, "root_id": "root_a"},
+    )["yaml"])
+
+    assert {n["id"] for n in parsed["notes"]} == {"note_in"}
+
+
+def test_export_yaml_notes_filter_respects_anchor_kind(storage: Storage) -> None:
+    """#66: anchor_id is polymorphic (node OR root). A node id colliding with
+    a different root's id must NOT leak that root's note into an export scoped
+    to a subtree that merely contains the colliding node id."""
+    import json as _json
+    sid = _seed_small_decision_tree(storage)  # root_a, nodes h1/h2/d1/r1
+    # A second, out-of-scope root whose id collides with a node we put under
+    # root_a (caller-supplied ids via insert; bulk_import allows the same).
+    spawn_root(
+        storage=storage,
+        arguments={"session_id": sid, "topic": "Other"},
+        now="2026-05-20T10:00:00Z",
+        new_id=lambda p: "collide",
+    )
+    storage.insert_node_under_parent(
+        node_id="collide", session_id=sid, node_type="question",
+        text="node whose id == root 'collide'", parent_id="root_a",
+        now="2026-05-20T10:02:00Z",
+    )
+    # Root-anchored note on the OUT-OF-SCOPE root 'collide'.
+    storage.add_note(
+        session_id=sid, anchor_kind="root", anchor_id="collide",
+        kind="caveat", text="out-of-scope root note", note_id="note_leak",
+        now="2026-05-20T12:00:00Z",
+    )
+
+    parsed = _json.loads(export_yaml(
+        storage=storage, arguments={"session_id": sid, "root_id": "root_a"},
+    )["yaml"])
+
+    # The root-anchored note must NOT appear: root 'collide' is out of scope,
+    # even though a node with id 'collide' is in the rendered subtree.
+    assert "note_leak" not in {n["id"] for n in parsed["notes"]}
+
+
 def test_resolve_hypothesis_branch_tool_without_rationale(storage: Storage) -> None:
     sid = _start_with_root(storage)
     add_node(
@@ -2190,6 +2291,44 @@ def test_bulk_import_custom_provenance_state(tmp_db_path: str) -> None:
     for row in result["imported_nodes"]:
         assert row["provenance"] == "inferred"
         assert row["state"] == "active"
+
+
+def test_bulk_import_active_grounded_fine_graph(tmp_db_path: str) -> None:
+    """#61: the documented active fine-graph bulk path —
+    state='active', provenance='grounded' — lands nodes in the active graph
+    surface (status='open', visible to list_open_nodes), not as an archived
+    /dpd-import hypothetical. Regression guard for the discoverability docs:
+    if a future change narrows bulk_import to archived-only, this fails."""
+    from dpd_mcp_server import tools as t
+    storage = Storage.open(tmp_db_path)
+    sid, rid = _setup_bulk_import(storage)
+
+    nodes = [
+        {"id": "n1", "type": "question", "text": "Q", "parent_id": rid, "parent_kind": "root", "paired_for": None, "achievement_conditions": None},
+        {"id": "n2", "type": "hypothesis", "text": "H", "parent_id": "n1", "parent_kind": "node", "paired_for": None, "achievement_conditions": None},
+    ]
+    edges = [
+        {"from": "n2", "to": "n1", "type": "supports", "reason": "fine-graph"},
+    ]
+    result = t.bulk_import_subgraph(
+        storage=storage,
+        arguments={
+            "session_id": sid, "root_id": rid, "nodes": nodes, "edges": edges,
+            "state": "active", "provenance": "grounded",
+        },
+        now="2026-05-22T10:01:00Z",
+    )
+
+    for row in result["imported_nodes"]:
+        assert row["state"] == "active"
+        assert row["provenance"] == "grounded"
+        assert row["status"] == "open"
+    assert len(result["imported_edges"]) == 1
+
+    # The decisive distinction from /dpd-import: active nodes are reachable
+    # through the active-graph query surface, not just find_similar over archives.
+    open_ids = {n["id"] for n in storage.list_open_nodes(session_id=sid)}
+    assert {"n1", "n2"} <= open_ids
 
 
 def test_bulk_import_paired_for_resolves(tmp_db_path: str) -> None:

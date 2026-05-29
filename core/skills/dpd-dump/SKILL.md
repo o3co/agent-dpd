@@ -36,7 +36,7 @@ Announce: "Using dpd-dump skill."
 export_yaml(session_id=<session_id>, root_id=<root_id or omit for all>)
 ```
 
-Returns JSON text (a strict subset of YAML; json.loads round-trippable) representing the full graph or subtree — every node and edge, all relationships first-class (no second-class visual rendering).
+Returns JSON text (a strict subset of YAML; json.loads round-trippable) representing the full graph or subtree — every node, edge, and **note**, all relationships first-class (no second-class visual rendering). The top-level `notes` array carries the **active** notes anchored to any rendered node/root (#64); superseded/archived notes are omitted (the dump is the current-frontier view — use `list_notes(include_archived=true)` for note history).
 
 ---
 
