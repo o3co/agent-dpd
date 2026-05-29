@@ -130,4 +130,21 @@ else
   exit 1
 fi
 
+# Test 7: marketplace git-subdir extraction is self-contained (#69 regression guard).
+# Test 4 above resolves core/ through the FULL repo checkout, where the
+# packaging/claude-code/core symlink dereferences fine — so it stayed green while
+# the PUBLISHED artifact was broken. The marketplace (`git-subdir`) extracts ONLY
+# packaging/claude-code/; anything its `core` entry points at OUTSIDE that subtree
+# is left dangling. Reproduce that extraction boundary exactly and assert the
+# bootstrap path resolves. This is what Test 4 could not see.
+REPO_ROOT="$(git -C "$HOOK_DIR/.." rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$REPO_ROOT" ] || { echo "FAIL: Test 7 must run inside the git repo"; exit 1; }
+EXTRACT="$TMPDIR/subdir-extract"
+mkdir -p "$EXTRACT"
+# git archive ships COMMITTED tracked content exactly as git-subdir would.
+git -C "$REPO_ROOT" archive HEAD packaging/claude-code | tar -x -C "$EXTRACT"
+test -f "$EXTRACT/packaging/claude-code/core/server/pyproject.toml" \
+  || { echo "FAIL: core/server/pyproject.toml does NOT resolve inside an extracted packaging/claude-code/ subtree (#69: core escapes the subtree)"; exit 1; }
+echo "OK: extracted packaging/claude-code/ subtree is self-contained (#69 marketplace bootstrap path)"
+
 echo "All session-start.sh tests passed."
