@@ -7,6 +7,35 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-05-29
+
+Packaging hotfix (#69): the published `dpd@agent-market` 0.10.0 was unusable —
+the MCP server failed to bootstrap and the skills did not resolve.
+
+### Fixed
+
+- **`packaging/claude-code/` is now a self-contained subtree** (#69). It
+  previously shipped escaping symlinks — `core -> ../../core` and
+  `skills/* -> ../../../core/skills/*` — whose targets live at the repo root,
+  *outside* the packaged directory. The marketplace installs this plugin via a
+  `git-subdir` source that extracts **only** `packaging/claude-code/`, so those
+  targets dangled: `session-start.sh` couldn't find `core/server/pyproject.toml`
+  (venv never built, `/mcp` reconnect failure) and the skill dirs were broken.
+  Fix inverts the symlink direction — the **real** `core/` now lives at
+  `packaging/claude-code/core/` (single source of truth), repo-root `core` is a
+  symlink into it (transparent to `Makefile` / `install.sh`), and the
+  `skills/*` symlinks now point within the subtree (`../core/skills/*`). No code
+  or API change. Resolves downstream `o3co/agent-market#1`.
+
+### Testing
+
+- `test_session_start.sh` **Test 7** reproduces the marketplace extraction
+  boundary (`git archive HEAD packaging/claude-code | tar -x`) and asserts
+  `core/server/pyproject.toml` resolves inside the extracted subtree. The
+  pre-existing Test 4 stayed green on the broken artifact because it resolved
+  `core/` through the full repo checkout, never crossing the `git-subdir`
+  boundary (#20's smoke test had the same blind spot).
+
 ## [0.10.0] — 2026-05-29
 
 Three threads: `bulk_import_subgraph` **discoverability** (#61), and two

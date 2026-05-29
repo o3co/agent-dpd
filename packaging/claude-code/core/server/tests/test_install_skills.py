@@ -12,7 +12,20 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+# Resolve the repo root as the nearest ancestor that actually contains
+# install.sh, rather than a fixed parents[N] hop. The real test file lives
+# under packaging/claude-code/core/server/tests/ (since #69 inverted the core
+# symlink), and Path.resolve() follows the root `core` symlink into that real
+# location — a hard-coded depth silently breaks whenever the layout shifts.
+def _repo_root_with(marker: str) -> Path:
+    here = Path(__file__).resolve()
+    for candidate in (here, *here.parents):
+        if (candidate / marker).is_file():
+            return candidate
+    raise RuntimeError(f"{marker} not found in any ancestor of {here}")
+
+
+REPO_ROOT = _repo_root_with("install.sh")
 INSTALL_SH = REPO_ROOT / "install.sh"
 
 
