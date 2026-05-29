@@ -294,3 +294,61 @@ def test_list_unverified_edges_dispatched_by_call_tool(
         {"session_id": "s", "agent_scope": "test-scope"},
     ))
     assert result == {"edges": []}
+
+
+def test_note_tools_registered_in_list_tools() -> None:
+    """add_note / list_notes are exposed with their required fields."""
+    from dpd_mcp_server import server as server_module
+
+    tools = _call_list_tools(server_module)
+    names = {t.name for t in tools}
+    assert {"add_note", "list_notes"} <= names
+
+    add = next(t for t in tools if t.name == "add_note")
+    assert set(add.inputSchema["required"]) == {
+        "session_id", "anchor_kind", "anchor_id", "kind", "text",
+    }
+    assert add.inputSchema["properties"]["anchor_kind"]["enum"] == ["node", "root"]
+
+    listing = next(t for t in tools if t.name == "list_notes")
+    assert listing.inputSchema["required"] == ["session_id"]
+
+
+def test_add_note_dispatched_by_call_tool(tmp_path, monkeypatch) -> None:
+    """call_tool routes add_note (a now + new_id taking tool)."""
+    import asyncio
+    from dpd_mcp_server import server as server_mod
+
+    captured: dict = {}
+
+    def fake_add_note(*, storage, arguments, now, new_id):
+        captured["arguments"] = arguments
+        return {"note_id": "note_x", "superseded_note_id": None}
+
+    monkeypatch.setattr(server_mod.tools, "add_note", fake_add_note)
+    monkeypatch.setenv("DPD_DATA_DIR", str(tmp_path))
+    result = asyncio.run(server_mod.call_tool(
+        "add_note",
+        {"session_id": "s", "anchor_kind": "node", "anchor_id": "n",
+         "kind": "narrative", "text": "body", "agent_scope": "test-scope"},
+    ))
+    assert result == {"note_id": "note_x", "superseded_note_id": None}
+    assert captured["arguments"]["kind"] == "narrative"
+    assert "agent_scope" not in captured["arguments"]
+
+
+def test_list_notes_dispatched_by_call_tool(tmp_path, monkeypatch) -> None:
+    """call_tool routes list_notes (a read-only tool)."""
+    import asyncio
+    from dpd_mcp_server import server as server_mod
+
+    def fake_list(*, storage, arguments):
+        return {"notes": []}
+
+    monkeypatch.setattr(server_mod.tools, "list_notes", fake_list)
+    monkeypatch.setenv("DPD_DATA_DIR", str(tmp_path))
+    result = asyncio.run(server_mod.call_tool(
+        "list_notes",
+        {"session_id": "s", "agent_scope": "test-scope"},
+    ))
+    assert result == {"notes": []}

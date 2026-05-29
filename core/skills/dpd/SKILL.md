@@ -613,6 +613,8 @@ Full tool list. New tools added in v0.3.1 Phase 2 are marked **[v0.3.1]**.
 | `force_purge_session(session_id)` | Cascade-delete an entire session — nodes, edges, roots, the session row. Emergency only; bypasses preconditions. |
 | `bulk_import_subgraph(session_id, root_id, nodes, edges, provenance?, state?)` | **[v0.3.1]** Atomic batch insert of multiple nodes + edges with provenance/state. `provenance` defaults to `'imported'`, `state` defaults to `'archived'`. Used by `/dpd-import`. |
 | `find_similar(query, scope?, top_k?, include_open?)` | **[v0.3.2]** Retrieve closed/archived subgraphs whose FTS5 index matches the query. `scope` narrows to a sub-scope (None = all). `include_open=True` also covers active subgraphs via dynamic LIKE. Returns `{results: [SubgraphSummary, ...]}`. |
+| `add_note(session_id, anchor_kind, anchor_id, kind, text)` | **[v0.9]** (#55) Attach a long-form note to an anchor (`anchor_kind` ∈ `'node'`/`'root'`; root = a subgraph). `kind` ∈ `'narrative'`/`'caveat'`/`'external-analysis'`/`'rejected-alternative'`. At most one active note per `(anchor, kind)`: a second one archives the first (append-only lineage). Returns `{note_id, superseded_note_id}`. See Note layer section. |
+| `list_notes(session_id, anchor_kind?, anchor_id?, kind?, include_archived?)` | **[v0.9]** (#55) List notes oldest-first. `anchor_kind`+`anchor_id` filter to one anchor (supply both or neither); `kind` to one axis; `include_archived=true` walks supersession history (default active only). |
 
 **Session mode transition table (§9.1.1):**
 
@@ -702,6 +704,48 @@ The verification obligation is **edge-local and keyed off `layer='necessary'`** 
 ### Deferred
 
 Completion-% reporting ("this region is N% classified") is intentionally **unavailable** — there is no declared region boundary by design. If an explicit region model is later needed, it layers on top (a `discipline_regions` table) without reinterpreting existing tagged edges.
+
+---
+
+## Note layer [v0.9] (#55)
+
+The graph is the source of truth for **structure** — decisions, dependencies, contradictions, realization, grounding, verdicts. But some content is irreducibly *narrative*: the body of an external analysis, the feel of a rejected alternative, a background caveat. The note layer is where that residue lives, **anchored** to the graph node or subgraph it belongs to — so the source of truth is `graph + notes`, not `graph + a conversation that evaporates`.
+
+### Sufficiency invariant (the discipline core — hard rule)
+
+> At any decision point, the graph **alone** must let you (1) re-justify the decision and (2) derive the spec text. If you cannot answer without replaying the conversation, that reasoning has **leaked** — capture it (structure → graph, narrative → note).
+
+### (a)/(b) — what goes where
+
+- **(a) merely not-yet-structured → graph.** A dependency, a realization, a *verdict/conclusion*. These get nodes and typed edges (and `record_edge_verification` for verification verdicts). The moment a relation or conclusion crystallizes, it is (a).
+- **(b) inherently narrative → note.** Long-form prose that no node/edge captures without loss.
+
+| Content | Class | Lands as |
+|---|---|---|
+| "A requires B" | (a) | `requires` edge |
+| Verdict / counter-arg / dismissal **conclusion** | (a) | evidence/verification node + `contradicts`/`justifies` edge + `record_edge_verification` |
+| Body / argument-flow of an external (e.g. Codex) analysis | (b) | note, `kind='external-analysis'` (extract only the conclusion to (a)) |
+| Facts+reasons a path was rejected | (a) | `supersedes`/`invalidates` edge + rationale |
+| The *tone/feel* of that rejected path | (b) | note, `kind='rejected-alternative'` |
+| Background prose; a qualifier | (b) | note, `kind='narrative'` / `'caveat'` |
+
+**Anti-pattern (hard rule):** never bury a verdict/counter-argument/dismissal *conclusion* in a note body. That just moves the leak from `text`→`note`. Conclusions are always graph-queryable; notes carry only the long-form narrative around them.
+
+### kind vocabulary (closed, like edge types)
+
+`narrative` · `caveat` · `external-analysis` · `rejected-alternative`. Closed on purpose — a free-form kind would drift and turn notes into a dumping ground. Extending it is a deliberate spec change (propose in an issue), exactly like the edge-type vocabulary.
+
+### Canonicality + supersession
+
+At most **one active note per `(anchor, kind)`** — structurally enforced by a partial unique index. A second note on the same axis is a *smell* (it means the note should be consolidated, not duplicated). `add_note` on an axis that already has an active note **archives the old one and inserts the new** (append-only lineage); the old id comes back as `superseded_note_id`. Walk the history with `list_notes(..., include_archived=true)`. The unique constraint forbids duplicate *rows*; it does not police prose bloat **inside** a note — that stays a discipline (a future completeness-sweep skill will help).
+
+### Lifecycle
+
+Notes are independent of their anchor's state: archiving/closing a node leaves its notes intact (lineage and the sufficiency invariant may still need them). **Physical deletion** of an anchor (`force_delete`, subgraph `delete`, session purge) cascade-deletes its notes — no note ever outlives its anchor.
+
+### Not yet (deferred, tracked under #55)
+
+(a)-migration helper / completeness-sweep skill, note-aware FTS dedup, edge & verification anchors, `migrate_note`. The supersession/frontier *mechanism* for graph evolution is #16; the note layer does not depend on it.
 
 ---
 

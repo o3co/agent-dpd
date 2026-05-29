@@ -1131,6 +1131,94 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["query"],
             },
         ),
+        types.Tool(
+            name="add_note",
+            title="Add note",
+            description=(
+                "Attach a long-form note to an anchor (a node, or a root = "
+                "subgraph). Notes hold the narrative residue that cannot be "
+                "structured into the graph — caveats, external analysis bodies, "
+                "the feel of a rejected alternative. Decisions, relations, and "
+                "verdicts belong in nodes/edges, NOT here.\n"
+                "At most one active note exists per (anchor, kind): adding a "
+                "note on an axis that already has one archives the old note "
+                "(append-only lineage) and returns its id as superseded_note_id."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": [
+                    "session_id", "anchor_kind", "anchor_id", "kind", "text",
+                ],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "anchor_kind": {
+                        "type": "string",
+                        "enum": ["node", "root"],
+                        "description": "What the note is anchored to: a node, or a root (= a subgraph).",
+                    },
+                    "anchor_id": {
+                        "type": "string",
+                        "description": "Id of the anchoring node or root. Must already exist in the session (any state).",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "narrative", "caveat",
+                            "external-analysis", "rejected-alternative",
+                        ],
+                        "description": "Note axis. narrative=background prose; caveat=qualifier/warning; external-analysis=body of an external review (e.g. Codex); rejected-alternative=the feel/tone of a discarded option (its facts+reasons go in the graph).",
+                    },
+                    "text": {"type": "string"},
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="list_notes",
+            title="List notes",
+            description=(
+                "List notes in the session, oldest first. Filter to a single "
+                "anchor with anchor_kind + anchor_id (supply both or neither), "
+                "and/or to one axis with kind. By default only active notes are "
+                "returned; include_archived=true walks the supersession history."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "anchor_kind": {
+                        "type": ["string", "null"],
+                        "enum": ["node", "root", None],
+                        "description": "Filter to this anchor kind. Must be paired with anchor_id.",
+                    },
+                    "anchor_id": {
+                        "type": ["string", "null"],
+                        "description": "Filter to this anchor id. Must be paired with anchor_kind.",
+                    },
+                    "kind": {
+                        "type": ["string", "null"],
+                        "enum": [
+                            "narrative", "caveat",
+                            "external-analysis", "rejected-alternative", None,
+                        ],
+                        "description": "Filter to one note axis.",
+                    },
+                    "include_archived": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, include superseded (archived) notes in the result.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
     ]
     by_name = {t.name: t for t in tools}
     for old, new in LEGACY_ALIASES.items():
@@ -1199,6 +1287,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tools.delete_edge(storage=storage, arguments=tool_args, now=now)
     if name == "list_edges":
         return tools.list_edges(storage=storage, arguments=tool_args)
+    if name == "add_note":
+        return tools.add_note(
+            storage=storage, arguments=tool_args, now=now, new_id=new_id
+        )
+    if name == "list_notes":
+        return tools.list_notes(storage=storage, arguments=tool_args)
     if name == "set_edge_layer":
         return tools.set_edge_layer(storage=storage, arguments=tool_args, now=now)
     if name == "set_edge_verification_priority":

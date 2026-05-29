@@ -59,13 +59,13 @@ def test_migrate_creates_edge_verifications_table(tmp_path: Path) -> None:
 
 def test_migrate_is_idempotent(tmp_path: Path) -> None:
     db_path = str(tmp_path / "graph.sqlite")
-    Storage.open(db_path)  # already v7
+    Storage.open(db_path)  # Storage.open migrates all the way to the latest
 
-    migrate(db_path=db_path)  # should no-op
+    migrate(db_path=db_path)  # v6→v7 must no-op (version already ≥ 7)
 
     with sqlite3.connect(db_path) as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 7
+    assert version == 8
 
 
 def test_migrate_preserves_existing_edge_rows(tmp_path: Path) -> None:

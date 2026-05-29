@@ -959,6 +959,60 @@ def find_similar(
     return {"results": results}
 
 
+def add_note(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+    new_id: Callable[[str], str],
+) -> dict[str, Any]:
+    """Attach a note to an anchor (node or root), superseding any active note
+    on the same ``(anchor, kind)`` axis. Returns the new id plus the id of the
+    note it superseded (or None)."""
+    session_id = _required(arguments, "session_id")
+    anchor_kind = _required(arguments, "anchor_kind")
+    anchor_id = _required(arguments, "anchor_id")
+    kind = _required(arguments, "kind")
+    text = _required(arguments, "text")
+    return storage.add_note(
+        session_id=session_id,
+        anchor_kind=anchor_kind,
+        anchor_id=anchor_id,
+        kind=kind,
+        text=text,
+        note_id=new_id("note"),
+        now=now,
+    )
+
+
+def list_notes(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """List notes in a session. ``anchor_kind`` and ``anchor_id`` filter to a
+    single anchor and must be supplied together (or both omitted); ``kind``
+    narrows to one axis; ``include_archived`` (default False) walks history."""
+    session_id = _required(arguments, "session_id")
+    anchor_kind = arguments.get("anchor_kind") or None
+    anchor_id = arguments.get("anchor_id") or None
+    if (anchor_kind is None) != (anchor_id is None):
+        raise ValueError(
+            "anchor_kind and anchor_id must be provided together "
+            "(both or neither)"
+        )
+    kind = arguments.get("kind") or None
+    include_archived = bool(arguments.get("include_archived") or False)
+    rows = storage.list_notes(
+        session_id=session_id,
+        anchor_kind=anchor_kind,
+        anchor_id=anchor_id,
+        kind=kind,
+        include_archived=include_archived,
+    )
+    return {"notes": [_row_to_dict(r) for r in rows]}
+
+
 def _required(arguments: dict[str, Any], key: str) -> Any:
     value = arguments.get(key)
     if value is None or value == "":

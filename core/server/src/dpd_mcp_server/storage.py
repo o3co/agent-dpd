@@ -29,12 +29,14 @@ class Storage:
             then migrate_v4_to_v5 (FTS table + backfill),
             then migrate_v5_to_v6 (ALTER TABLE: nodes.severity),
             then migrate_v6_to_v7 (ALTER TABLE: edges.layer +
-            verification_priority; CREATE edge_verifications).
-          - user_version = 3: run v3→v4, v4→v5, v5→v6, v6→v7.
-          - user_version = 4: run v4→v5, v5→v6, v6→v7.
-          - user_version = 5: run v5→v6, v6→v7.
-          - user_version = 6: run v6→v7 only.
-          - user_version >= 7: no migration needed; schema.sql is applied
+            verification_priority; CREATE edge_verifications),
+            then migrate_v7_to_v8 (CREATE notes + partial unique index).
+          - user_version = 3: run v3→v4, v4→v5, v5→v6, v6→v7, v7→v8.
+          - user_version = 4: run v4→v5, v5→v6, v6→v7, v7→v8.
+          - user_version = 5: run v5→v6, v6→v7, v7→v8.
+          - user_version = 6: run v6→v7, v7→v8.
+          - user_version = 7: run v7→v8 only.
+          - user_version >= 8: no migration needed; schema.sql is applied
             (CREATE TABLE IF NOT EXISTS is idempotent).
 
         SQLite limitation: ALTER TABLE cannot add CHECK constraints, so the
@@ -47,6 +49,7 @@ class Storage:
         from .migrate_v4_to_v5 import migrate as _migrate_v4_to_v5
         from .migrate_v5_to_v6 import migrate as _migrate_v5_to_v6
         from .migrate_v6_to_v7 import migrate as _migrate_v6_to_v7
+        from .migrate_v7_to_v8 import migrate as _migrate_v7_to_v8
 
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -87,20 +90,27 @@ class Storage:
             _migrate_v4_to_v5(db_path=db_path)
             _migrate_v5_to_v6(db_path=db_path)
             _migrate_v6_to_v7(db_path=db_path)
+            _migrate_v7_to_v8(db_path=db_path)
         elif pre_schema_version == 3:
             _migrate_v3_to_v4(db_path=db_path)
             _migrate_v4_to_v5(db_path=db_path)
             _migrate_v5_to_v6(db_path=db_path)
             _migrate_v6_to_v7(db_path=db_path)
+            _migrate_v7_to_v8(db_path=db_path)
         elif pre_schema_version == 4:
             _migrate_v4_to_v5(db_path=db_path)
             _migrate_v5_to_v6(db_path=db_path)
             _migrate_v6_to_v7(db_path=db_path)
+            _migrate_v7_to_v8(db_path=db_path)
         elif pre_schema_version == 5:
             _migrate_v5_to_v6(db_path=db_path)
             _migrate_v6_to_v7(db_path=db_path)
+            _migrate_v7_to_v8(db_path=db_path)
         elif pre_schema_version == 6:
             _migrate_v6_to_v7(db_path=db_path)
+            _migrate_v7_to_v8(db_path=db_path)
+        elif pre_schema_version == 7:
+            _migrate_v7_to_v8(db_path=db_path)
 
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
@@ -343,6 +353,137 @@ class Storage:
                     (session_id,),
                 )
             )
+
+    # ------------------------------------------------------------------
+    # Note layer (#55): anchored long-form narrative.
+    # ------------------------------------------------------------------
+
+    NOTE_ANCHOR_KINDS = frozenset({"node", "root"})
+    NOTE_KINDS = frozenset({
+        "narrative", "caveat", "external-analysis", "rejected-alternative",
+    })
+
+    def add_note(
+        self,
+        *,
+        session_id: str,
+        anchor_kind: str,
+        anchor_id: str,
+        kind: str,
+        text: str,
+        note_id: str,
+        now: str,
+    ) -> dict[str, Any]:
+        """Attach a note to an anchor, superseding any existing active note.
+
+        The anchor (``anchor_kind`` ∈ node/root, ``anchor_id``) must already
+        exist in the same session. Existence — not active state — is the bar:
+        a note may be attached to an archived/closed anchor (carry-forward and
+        /dpd-import both rely on this), mirroring ``add_edge``'s endpoint rule.
+
+        Growth is append-only by supersession (the canonicality invariant from
+        the note-layer spec): if an active note already exists for this
+        ``(anchor_kind, anchor_id, kind)``, it is archived (``state='archived'``,
+        ``updated_at=now``) and the new note inserted as the single active row.
+        The partial unique index ``uniq_notes_active_anchor_kind`` is the hard
+        guarantee that at most one active note exists per axis; this method is
+        the cooperative path that keeps callers from tripping it.
+
+        ``anchor_kind`` and ``kind`` are validated here (not just by the schema
+        CHECKs) so ALTER-upgraded databases reject bad values identically.
+        Returns ``{"note_id": <new>, "superseded_note_id": <old or None>}``.
+        """
+        if anchor_kind not in self.NOTE_ANCHOR_KINDS:
+            raise ValueError(
+                f"anchor_kind {anchor_kind!r} not in "
+                f"{sorted(self.NOTE_ANCHOR_KINDS)}"
+            )
+        if kind not in self.NOTE_KINDS:
+            raise ValueError(
+                f"note kind {kind!r} not in canonical vocabulary "
+                f"{sorted(self.NOTE_KINDS)}"
+            )
+        if not text:
+            raise ValueError("note text must be non-empty")
+        anchor_table = "nodes" if anchor_kind == "node" else "roots"
+        with self.connect() as conn:
+            exists = conn.execute(
+                f"SELECT 1 FROM {anchor_table} WHERE session_id = ? AND id = ?",
+                (session_id, anchor_id),
+            ).fetchone()
+            if exists is None:
+                raise ValueError(
+                    f"anchor {anchor_kind} {anchor_id!r} not found "
+                    f"in session {session_id!r}"
+                )
+            existing = conn.execute(
+                "SELECT id FROM notes "
+                "WHERE session_id = ? AND anchor_kind = ? AND anchor_id = ? "
+                "AND kind = ? AND state = 'active'",
+                (session_id, anchor_kind, anchor_id, kind),
+            ).fetchone()
+            superseded_id = existing["id"] if existing is not None else None
+            if superseded_id is not None:
+                conn.execute(
+                    "UPDATE notes SET state = 'archived', updated_at = ? "
+                    "WHERE id = ?",
+                    (now, superseded_id),
+                )
+            try:
+                conn.execute(
+                    "INSERT INTO notes "
+                    "(id, session_id, anchor_kind, anchor_id, kind, text, "
+                    "state, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+                    (note_id, session_id, anchor_kind, anchor_id, kind, text,
+                     now, now),
+                )
+            except sqlite3.IntegrityError as exc:
+                # Uniqueness collision (e.g. a concurrent writer inserted an
+                # active note on this axis between our archive and insert) or a
+                # CHECK violation on an ALTER-upgraded DB. Lock contention may
+                # instead surface as sqlite3.OperationalError, which we let
+                # propagate rather than mislabel as a value error.
+                raise ValueError(
+                    f"cannot add note for {anchor_kind} {anchor_id!r} "
+                    f"(kind={kind!r}): {exc}"
+                ) from exc
+            self._touch_session(conn, session_id=session_id, now=now)
+            return {"note_id": note_id, "superseded_note_id": superseded_id}
+
+    def list_notes(
+        self,
+        *,
+        session_id: str,
+        anchor_kind: str | None = None,
+        anchor_id: str | None = None,
+        kind: str | None = None,
+        include_archived: bool = False,
+    ) -> list[sqlite3.Row]:
+        """List notes in a session, oldest first.
+
+        Filters are additive and all optional: ``anchor_kind`` + ``anchor_id``
+        narrow to a single anchor, ``kind`` to one axis. ``include_archived``
+        defaults to False so callers see only the live (active) notes; pass
+        True to walk the supersession history. The ``anchor_kind``/``anchor_id``
+        pairing contract (both or neither) is enforced at the tool layer.
+        """
+        sql = "SELECT * FROM notes WHERE session_id = ?"
+        params: list[Any] = [session_id]
+        if anchor_kind is not None:
+            sql += " AND anchor_kind = ?"
+            params.append(anchor_kind)
+        if anchor_id is not None:
+            sql += " AND anchor_id = ?"
+            params.append(anchor_id)
+        if kind is not None:
+            sql += " AND kind = ?"
+            params.append(kind)
+        if not include_archived:
+            sql += " AND state = 'active'"
+        sql += " ORDER BY created_at, id"
+        with self.connect() as conn:
+            return list(conn.execute(sql, params))
 
     def insert_node(
         self,
@@ -1993,6 +2134,13 @@ class Storage:
                 """,
                 (now, "dropped:subgraph_deleted", *members),
             )
+            # Cascade notes anchored to any member node (child-first; anchor_id
+            # has no FK so the cleanup is app-side, like the edges delete above).
+            conn.execute(
+                f"DELETE FROM notes WHERE session_id = ? "
+                f"AND anchor_kind = 'node' AND anchor_id IN ({placeholders})",
+                (session_id, *members),
+            )
             conn.execute(
                 f"DELETE FROM nodes WHERE session_id = ? AND id IN ({placeholders})",
                 (session_id, *members),
@@ -2093,6 +2241,16 @@ class Storage:
         """
         conn.execute(
             "DELETE FROM edges WHERE session_id = ?", (session_id,),
+        )
+        # Cascade every note left in the session before the session row goes:
+        # notes.session_id is a real FK, so deleting the session with notes
+        # still attached would raise. This single session-scoped delete is the
+        # chokepoint for BOTH purge paths — it also catches root-anchored notes
+        # that purge_session's "no nodes remain" precondition would otherwise
+        # leave behind (node-anchored notes are already gone via the node
+        # delete paths). Must run before DELETE FROM sessions.
+        conn.execute(
+            "DELETE FROM notes WHERE session_id = ?", (session_id,),
         )
         conn.execute(
             "UPDATE pool_items SET origin_session_id = NULL "
@@ -2534,6 +2692,13 @@ class Storage:
                     "DELETE FROM subgraphs_fts WHERE start_node_id = ?",
                     (node_id,),
                 )
+            # Cascade notes anchored to this node (child-first: no note may
+            # outlive its anchor). anchor_id has no FK, so this is app-side.
+            conn.execute(
+                "DELETE FROM notes WHERE session_id = ? "
+                "AND anchor_kind = 'node' AND anchor_id = ?",
+                (session_id, node_id),
+            )
             conn.execute(
                 "DELETE FROM nodes WHERE session_id = ? AND id = ?",
                 (session_id, node_id),
