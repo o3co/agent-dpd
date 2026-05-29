@@ -7,8 +7,8 @@
 #   - Developers who want a raw editable install without the Claude Code plugin system
 #
 # Claude Code users should install via the plugin system instead:
-#   /plugin marketplace add o3co/agent-dpd
-#   /plugin install dpd@agent-dpd
+#   /plugin marketplace add https://github.com/o3co/agent-market.git
+#   /plugin install dpd@agent-market
 #
 # Usage:
 #   ./install.sh                                        (from inside a clone)
@@ -163,8 +163,8 @@ Cursor users:
 
 Claude Code users:
   install.sh does NOT install for Claude Code. Use the plugin system:
-    /plugin marketplace add o3co/agent-dpd
-    /plugin install dpd@agent-dpd
+    /plugin marketplace add https://github.com/o3co/agent-market.git
+    /plugin install dpd@agent-market
 
 EOF
 }
