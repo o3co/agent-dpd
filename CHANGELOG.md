@@ -7,6 +7,18 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-05-29
+
+### Fixed
+
+- **`hooks/hooks.json` manifest schema** (#69 follow-up): events must be nested
+  under a top-level `hooks` record (`{"hooks": {"SessionStart": [...]}}`), not
+  placed at the top level. The bare form failed Claude Code's loader
+  (`expected record, received undefined` at `hooks`), silently disabling the
+  SessionStart venv bootstrap and breaking the MCP server connect. Surfaced once
+  0.10.1 fixed the core symlink and the plugin loaded far enough to validate
+  hooks.
+
 ## [0.10.1] — 2026-05-29
 
 Packaging hotfix (#69): the published `dpd@agent-market` 0.10.0 was unusable —
