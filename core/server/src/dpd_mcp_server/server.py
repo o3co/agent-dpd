@@ -1035,10 +1035,16 @@ async def list_tools() -> list[types.Tool]:
             name="bulk_import_subgraph",
             title="Bulk import subgraph",
             description=(
-                "Atomically import a multi-node + edge subgraph under an existing root. "
-                "Used by /dpd-import to construct a hypothetical archived subgraph from "
-                "external prose/spec/graph. All FK refs validated pre-flight; full rollback "
-                "on any failure."
+                "Atomically insert a multi-node + edge subgraph under an existing root. "
+                "All FK refs validated pre-flight (root_id, parent_id, paired_for, edge "
+                "endpoints) with topological sort + cycle detection; full rollback on any "
+                "failure. Two use cases via the state/provenance params: "
+                "(1) /dpd-import builds a hypothetical archived subgraph from external "
+                "prose/spec/graph — the default state='archived', provenance='imported'. "
+                "(2) Active fine-graph extension — decomposing one parent into many "
+                "siblings + edges in one atomic op instead of N sequential add_node calls "
+                "— pass state='active', provenance='grounded'; the nodes land in the live "
+                "graph exactly as per-call add_node would produce."
             ),
             inputSchema={
                 "type": "object",
@@ -1090,11 +1096,13 @@ async def list_tools() -> list[types.Tool]:
                         "type": "string",
                         "enum": ["grounded", "inferred", "imported", "manual"],
                         "default": "imported",
+                        "description": "Origin stamped on every imported node. Default 'imported' (/dpd-import). For active fine-graph extension use 'grounded' (conversation-derived), matching add_node's default.",
                     },
                     "state": {
                         "type": "string",
                         "enum": ["active", "archived", "closed", "deletable", "gone"],
                         "default": "archived",
+                        "description": "Lifecycle state for every imported node. Default 'archived' (/dpd-import hypothetical). Pass 'active' to extend the live graph in one atomic batch instead of N sequential add_node calls.",
                     },
                     "agent_scope": {
                         "type": ["string", "null"],

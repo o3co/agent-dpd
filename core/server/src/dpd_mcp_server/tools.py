@@ -632,6 +632,30 @@ def export_yaml(
                 "verification_priority": edge["verification_priority"],
             })
 
+    # Notes anchored to a rendered node or root (active only — export mirrors
+    # the current-frontier view, like the active-roots filter above). Notes are
+    # part of the source of truth (graph + notes), so a full dump must carry
+    # them. The filter is anchor_kind-aware: anchor_id is polymorphic (a node
+    # id OR a root id), and bulk_import accepts caller-supplied node ids, so a
+    # node id can collide with a root id. Matching against the merged set by id
+    # alone would leak an out-of-scope root's note when an in-scope node shares
+    # that id — so each kind is checked against its own rendered set. (#55/#64/#66)
+    note_dicts: list[dict[str, Any]] = []
+    for note in storage.list_notes(session_id=session_id):
+        in_scope = (
+            (note["anchor_kind"] == "root" and note["anchor_id"] in rendered_root_ids)
+            or (note["anchor_kind"] == "node" and note["anchor_id"] in rendered_node_ids)
+        )
+        if in_scope:
+            note_dicts.append({
+                "id": note["id"],
+                "anchor_kind": note["anchor_kind"],
+                "anchor_id": note["anchor_id"],
+                "kind": note["kind"],
+                "state": note["state"],
+                "text": note["text"],
+            })
+
     payload = {
         "session": {
             "id": session_row["id"],
@@ -643,6 +667,7 @@ def export_yaml(
         },
         "roots": root_dicts,
         "edges": edge_dicts,
+        "notes": note_dicts,
     }
     return {"yaml": _json.dumps(payload, indent=2, ensure_ascii=False)}
 

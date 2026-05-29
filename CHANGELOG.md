@@ -7,7 +7,41 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
-- **Install moved to the shared [`agent-market`](https://github.com/o3co/agent-market) marketplace.** Use `/plugin marketplace add https://github.com/o3co/agent-market.git` then `/plugin install dpd@agent-market` (alongside `fcot`). Removed this repo's self-marketplace manifest (`.claude-plugin/marketplace.json`) — `agent-market` is now the canonical discovery source; `packaging/claude-code` (the plugin itself) is unchanged. README / AGENTS updated; install paths now resolve under `cache/agent-market/...`. No version bump (docs/packaging only).
+## [0.10.0] — 2026-05-29
+
+Three threads: `bulk_import_subgraph` **discoverability** (#61), and two
+note-layer **projection** follow-ups — the full graph dump now carries notes
+(#64) and an export scoping leak is closed (#66).
+
+### Added
+
+- **`export_yaml` / `/dpd-dump` now emit a top-level `notes` array** (#64) —
+  active notes anchored to any rendered node/root. Without this, the documented
+  "full graph dump" silently dropped notes once they became part of the source
+  of truth. Archived/superseded notes are omitted (the dump is the
+  current-frontier view; use `list_notes(include_archived=true)` for history).
+- **`test_bulk_import_active_grounded_fine_graph`** (#61) — regression guard
+  asserting that `state="active", provenance="grounded"` lands nodes in the
+  live graph (`status='open'`, visible to `list_open_nodes`), distinct from an
+  archived `/dpd-import` hypothetical.
+
+### Changed
+
+- **`bulk_import_subgraph` tool description + `state`/`provenance` schema docs**
+  (#61) — now spell out the two use cases: `/dpd-import` (archived/imported,
+  the defaults) vs. active fine-graph extension (`active`/`grounded`). The
+  `/dpd` SKILL.md tool table documents the same, and recommends the bulk path
+  over sequential `add_node` once a decomposition exceeds a handful of siblings.
+
+### Fixed
+
+- **`export_yaml` note filter now respects `anchor_kind`** (#66) — notes were
+  filtered by `anchor_id` against a merged node+root id set, so a caller-supplied
+  node id colliding with a different root's id could leak that out-of-scope
+  root's note into a subtree export. Each kind is now matched against its own
+  rendered set.
+
+- **Install moved to the shared [`agent-market`](https://github.com/o3co/agent-market) marketplace.** Use `/plugin marketplace add https://github.com/o3co/agent-market.git` then `/plugin install dpd@agent-market` (alongside `fcot`). Removed this repo's self-marketplace manifest (`.claude-plugin/marketplace.json`) — `agent-market` is now the canonical discovery source; `packaging/claude-code` (the plugin itself) is unchanged. README / AGENTS updated; install paths now resolve under `cache/agent-market/...`. (Shipped here; was docs/packaging-only with no bump of its own.)
 
 ## [0.9.0] — 2026-05-29
 
