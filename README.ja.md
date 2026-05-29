@@ -19,23 +19,25 @@ Claude Code スキル + MCP サーバで実現します。
 ### Claude Code (推奨)
 
 ```text
-/plugin marketplace add o3co/agent-dpd
-/plugin install dpd@agent-dpd
+/plugin marketplace add https://github.com/o3co/agent-market.git
+/plugin install dpd@agent-market
 ```
+
+> **注意:** `.git` サフィックスは必須です。短い `o3co/agent-market` 形式も有効と文書化されていますが、一部の環境で "Invalid marketplace source format" と弾かれるため、明示的な URL 形式が確実です。`dpd` は共有マーケットプレイス [`agent-market`](https://github.com/o3co/agent-market)（`fcot` と同居）経由で配布されます。
 
 **インストール後は新しい Claude Code セッションを開始してください** (ターミナルで `claude` を新規起動、または IDE を完全に閉じて開き直す)。`/reload-plugins` や window reload だけでは初回 install 時の SessionStart フックが発火しないことがあり、venv が bootstrap されません。新セッションの初回起動は ~10–30s かかります (フックがバンドルされた server source に対して `pip install -e` を走らせるため)。
 
 > **0.3.x からのアップグレード**: 以前 `install.sh` でインストールしていた場合は、先に `rm -f ~/.claude/skills/dpd ~/.claude/skills/dpd-*` と `claude mcp remove dpd-mcp-server` を実行してください。古い symlink と MCP 登録がプラグイン側を shadow しないようにするためです。`~/.claude/dpd-server/data/` のグラフデータは保持されます。詳細は [CHANGELOG: Upgrading from 0.3.x](CHANGELOG.md#upgrading-from-03x) を参照。
 
-このリポジトリを Claude Code のマーケットプレイスとして登録し、`dpd` プラグインをインストールします。プラグインには以下が含まれます:
+`agent-market` マーケットプレイスを追加し、そこから `dpd` プラグインをインストールします。プラグインには以下が含まれます:
 
-- `/dpd`, `/dpd-status`, `/dpd-dump`, `/dpd-edit`, `/dpd-fill`, `/dpd-find-similar`, `/dpd-import`, `/dpd-summary-md`, `/dpd-feedback` スラッシュコマンド
+- `/dpd`, `/dpd-status`, `/dpd-dump`, `/dpd-edit`, `/dpd-fill`, `/dpd-find-similar`, `/dpd-import`, `/dpd-summary-md`, `/dpd-verify-edge`, `/dpd-feedback` スラッシュコマンド
 - MCP サーバ (`dpd-mcp-server`)。初回セッション時に venv を自動構築します
 - プラグイン同梱の Python パッケージと venv を同期させる SessionStart フック
 
-プラグイン本体は `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (実際のパス: `~/.claude/plugins/cache/agent-dpd/dpd/0.5.0/`)、永続 venv は `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (実際のパス: `~/.claude/plugins/data/dpd-agent-dpd/.venv/`) に配置されます。venv パスは Claude Code が SessionStart フックに渡す `${CLAUDE_PLUGIN_DATA}` の実体です。
+プラグイン本体は `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (実際のパス: `~/.claude/plugins/cache/agent-market/dpd/0.7.0/`)、永続 venv は `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (実際のパス: `~/.claude/plugins/data/dpd-agent-market/.venv/`) に配置されます。venv パスは Claude Code が SessionStart フックに渡す `${CLAUDE_PLUGIN_DATA}` の実体です。
 
-更新するには `/plugin update dpd` を実行するか、Claude Code の自動更新に任せます。これでプラグイン同梱ソースが更新され、次セッションの SessionStart フックが pyproject.toml ハッシュ変化を検出して venv を再ビルドします。プラグインの venv 内で直接 `pip install -U dpd-mcp-server` を **実行しないでください**: フックはこの手動更新を検出できず (バンドルソース変化時のみ再ビルド)、venv が同梱ソースと静かに desync します。venv をクリーンにしたい場合は `~/.claude/plugins/data/dpd-agent-dpd/.venv/` を削除して Claude Code を再起動すれば、フックが再ビルドします。
+更新するには `/plugin update dpd` を実行するか、Claude Code の自動更新に任せます。これでプラグイン同梱ソースが更新され、次セッションの SessionStart フックが pyproject.toml ハッシュ変化を検出して venv を再ビルドします。プラグインの venv 内で直接 `pip install -U dpd-mcp-server` を **実行しないでください**: フックはこの手動更新を検出できず (バンドルソース変化時のみ再ビルド)、venv が同梱ソースと静かに desync します。venv をクリーンにしたい場合は `~/.claude/plugins/data/dpd-agent-market/.venv/` を削除して Claude Code を再起動すれば、フックが再ビルドします。
 
 ### Cursor
 

@@ -39,11 +39,11 @@ claude --plugin-dir packaging/claude-code
 Or to install permanently:
 
 ```text
-/plugin marketplace add o3co/agent-dpd
-/plugin install dpd@agent-dpd
+/plugin marketplace add https://github.com/o3co/agent-market.git
+/plugin install dpd@agent-market
 ```
 
-The plugin lays out `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (read-only on update; e.g. `~/.claude/plugins/cache/agent-dpd/dpd/0.5.0/`) and `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (persistent; e.g. `~/.claude/plugins/data/dpd-agent-dpd/.venv/`, venv lazy-bootstrapped by `packaging/claude-code/hooks/session-start.sh`).
+`dpd` is published through the shared [`agent-market`](https://github.com/o3co/agent-market) marketplace (which references this repo's `packaging/claude-code` via git-subdir). The plugin lays out `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (read-only on update; e.g. `~/.claude/plugins/cache/agent-market/dpd/0.7.0/`) and `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (persistent; e.g. `~/.claude/plugins/data/dpd-agent-market/.venv/`, venv lazy-bootstrapped by `packaging/claude-code/hooks/session-start.sh`).
 
 Runtime DPD data lives at `~/.claude/dpd-server/data/<encoded-agent-scope>/graph.sqlite`. Override with `DPD_DATA_DIR` (tests use this).
 
@@ -64,9 +64,9 @@ The `packaging/<agent>/skills/*` entries are symlinks to `core/skills/*` (single
 The dereference behavior above is load-bearing for the whole `packaging/claude-code/skills/*` + `core` symlink approach (without it the installed plugin would have dangling relative-path symlinks). Verify manually before any release that touches `packaging/claude-code/` layout:
 
 ```bash
-# After /plugin marketplace add o3co/agent-dpd && /plugin install dpd@agent-dpd
+# After /plugin marketplace add https://github.com/o3co/agent-market.git && /plugin install dpd@agent-market
 # in a fresh Claude Code session, confirm the installed plugin has real dirs, not symlinks:
-INSTALLED="$HOME/.claude/plugins/cache/agent-dpd/dpd"
+INSTALLED="$HOME/.claude/plugins/cache/agent-market/dpd"
 [ -d "$INSTALLED" ] || { echo "plugin not installed at $INSTALLED"; exit 1; }
 INSTALLED="$INSTALLED/$(ls -1 "$INSTALLED" | sort -V | tail -1)"  # latest version dir
 ls -la "$INSTALLED/skills" "$INSTALLED/core"  # both should be real dirs (d), NOT symlinks (l)
