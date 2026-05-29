@@ -7,6 +7,8 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+- **Install moved to the shared [`agent-market`](https://github.com/o3co/agent-market) marketplace.** Use `/plugin marketplace add https://github.com/o3co/agent-market.git` then `/plugin install dpd@agent-market` (alongside `fcot`). Removed this repo's self-marketplace manifest (`.claude-plugin/marketplace.json`) — `agent-market` is now the canonical discovery source; `packaging/claude-code` (the plugin itself) is unchanged. README / AGENTS updated; install paths now resolve under `cache/agent-market/...`. No version bump (docs/packaging only).
+
 ## [0.7.0] — 2026-05-28
 
 Drops graph-image output. As DPD graphs grew (multi-root, cross-root edges),

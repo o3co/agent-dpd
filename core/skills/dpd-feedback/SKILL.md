@@ -74,7 +74,7 @@ Collect (in this order). All shell expansions MUST use `${VAR:-}` form so that a
 ```bash
 # Plugin version: read from the *installed* plugin's manifest, not the source tree.
 # Claude Code sets CLAUDE_PLUGIN_ROOT to the installed plugin's cache directory
-# (e.g. ~/.claude/plugins/cache/agent-dpd/dpd/0.5.0/). The source-tree path
+# (e.g. ~/.claude/plugins/cache/agent-market/dpd/0.7.0/). The source-tree path
 # packaging/claude-code/.claude-plugin/plugin.json does NOT resolve in the
 # installed layout — packaging/ is a build-only directory and is not copied in.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json" ]; then
