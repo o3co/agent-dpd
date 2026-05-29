@@ -1073,6 +1073,16 @@ async def list_tools() -> list[types.Tool]:
                                 "to": {"type": "string"},
                                 "type": {"type": "string"},
                                 "reason": {"type": ["string", "null"]},
+                                "layer": {
+                                    "type": ["string", "null"],
+                                    "enum": ["necessary", "selective", "invalid", None],
+                                    "description": "#42 proof-tree discipline layer (orthogonal to type). Accepted so a load-bearing edge round-trips from export_yaml. NULL = not applied.",
+                                },
+                                "verification_priority": {
+                                    "type": ["string", "null"],
+                                    "enum": ["critical", "standard", "low", None],
+                                    "description": "#42: orders the list_unverified_edges queue. Optional; preserved on round-trip.",
+                                },
                             },
                         },
                     },

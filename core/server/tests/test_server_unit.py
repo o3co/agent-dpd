@@ -148,6 +148,27 @@ def test_add_edge_schema_enumerates_canonical_types() -> None:
     }
 
 
+def test_bulk_import_edge_schema_declares_layer_and_priority() -> None:
+    """#57/#42: export_yaml emits edge layer + verification_priority, so the
+    bulk_import_subgraph input schema must advertise them on edge items —
+    otherwise schema-driven clients cannot round-trip a load-bearing edge."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+    tools = asyncio.run(list_tools())
+    tool = next(t for t in tools if t.name == "bulk_import_subgraph")
+    edge_props = (
+        tool.inputSchema["properties"]["edges"]["items"]["properties"]
+    )
+    assert "layer" in edge_props
+    assert set(edge_props["layer"]["enum"]) == {
+        "necessary", "selective", "invalid", None,
+    }
+    assert "verification_priority" in edge_props
+    assert set(edge_props["verification_priority"]["enum"]) == {
+        "critical", "standard", "low", None,
+    }
+
+
 def test_purge_session_in_tool_registry() -> None:
     """Issue #12: purge_session + force_purge_session must be advertised."""
     import asyncio
