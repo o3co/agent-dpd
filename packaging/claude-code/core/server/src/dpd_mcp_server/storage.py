@@ -654,36 +654,58 @@ class Storage:
         session_id: str,
         root_id: str | None = None,
         state: str | None = None,
+        node_type: str | None = None,
+        after_rowid: int | None = None,
+        limit: int | None = None,
     ) -> list[sqlite3.Row]:
-        """Return open nodes in the session, optionally restricted to one root
-        and/or filtered by the ``state`` column.
+        """Return open nodes (creation-order via rowid), with the implicit
+        ``rowid`` exposed for keyset pagination.
 
-        With ``root_id=None``, returns every node with status='open' in the
-        session (creation-order). With a root, walks that root's subtree and
-        filters to open nodes.
+        ``root_id`` restricts to that root's subtree; ``state`` / ``node_type``
+        filter the columns; ``after_rowid`` + ``limit`` page by rowid.
 
-        When ``state`` is provided, the result is further filtered to nodes
-        whose ``state`` column matches the given value (e.g. ``'active'``).
-        When ``state`` is None (default), no state filter is applied —
-        preserving v2 behavior.
+        Root path uses ``walk_subtree`` + Python filtering/seek so there is no
+        ``IN (?, ?, ...)`` clause and no SQLITE_MAX_VARIABLE_NUMBER ceiling.
+        Root-less path stays as a single SQL query (no subtree to walk).
         """
         if root_id is None:
+            params: list[Any] = [session_id]
             sql = (
-                "SELECT * FROM nodes "
+                "SELECT rowid, * FROM nodes "
                 "WHERE session_id = ? AND status = 'open'"
             )
-            params: list[Any] = [session_id]
             if state is not None:
                 sql += " AND state = ?"
                 params.append(state)
-            sql += " ORDER BY created_at, id"
+            if node_type is not None:
+                sql += " AND type = ?"
+                params.append(node_type)
+            if after_rowid is not None:
+                sql += " AND rowid > ?"
+                params.append(after_rowid)
+            # Keyset pagination relies on rowid being stable & monotonic; never
+            # VACUUM this DB or cursors break (nodes.id is a TEXT PK, so rowid is a
+            # separate implicit counter that VACUUM would renumber).
+            sql += " ORDER BY rowid"
+            if limit is not None:
+                sql += " LIMIT ?"
+                params.append(limit)
             with self.connect() as conn:
                 return list(conn.execute(sql, params))
-        subtree = self.walk_subtree(session_id=session_id, root_id=root_id)
-        nodes = [n for n in subtree if n["status"] == "open"]
-        if state is not None:
-            nodes = [n for n in nodes if n["state"] == state]
-        return nodes
+        else:
+            from .pagination import seek_and_limit
+            rows = [
+                n for n in self.walk_subtree(
+                    session_id=session_id, root_id=root_id, include_rowid=True
+                )
+                if n["status"] == "open"
+            ]
+            if state is not None:
+                rows = [n for n in rows if n["state"] == state]
+            if node_type is not None:
+                rows = [n for n in rows if n["type"] == node_type]
+            rows.sort(key=lambda r: r["rowid"])
+            return seek_and_limit(rows, after_rowid=after_rowid, limit=limit)
 
     EDGE_TYPES = frozenset({
         "derived_from", "requires", "blocks", "supports", "contradicts",
@@ -1328,18 +1350,24 @@ class Storage:
         session_id: str,
         root_id: str | None = None,
         blocker_edge_type: str = "blocks",
+        state: str | None = None,
+        node_type: str | None = None,
+        after_rowid: int | None = None,
+        limit: int | None = None,
     ) -> list[sqlite3.Row]:
-        """Return open nodes that no still-live endpoint is blocking via the
-        given edge type (directional convention: edge.from blocks edge.to).
+        """Open nodes not blocked by a still-live endpoint via ``blocker_edge_type``.
 
-        A "live endpoint" is either a node with ``status='open'`` or a root
-        with ``lifecycle='active'``. Roots and nodes are treated symmetrically
-        as blocker candidates so users can express dependencies from either.
-
-        ``blocker_edge_type`` defaults to ``"blocks"`` but is overridable so a
-        caller using a different vocabulary (e.g., ``"requires"``) can opt in.
+        Pagination (``after_rowid`` + ``limit``) applies to the FINAL unblocked
+        set so a page is never short-changed by candidate-side cutting.
         """
-        candidates = self.list_open_nodes(session_id=session_id, root_id=root_id)
+        # Function-local by design (not a circular-import workaround): keeps the
+        # read-side payload layer out of storage's module-level import surface.
+        from .pagination import seek_and_limit
+
+        candidates = self.list_open_nodes(
+            session_id=session_id, root_id=root_id,
+            state=state, node_type=node_type,
+        )
         if not candidates:
             return []
         with self.connect() as conn:
@@ -1367,22 +1395,30 @@ class Storage:
                 (session_id, blocker_edge_type),
             ).fetchall()
         blocked_ids = {row["to_node"] for row in blocked}
-        return [n for n in candidates if n["id"] not in blocked_ids]
+        unblocked = [n for n in candidates if n["id"] not in blocked_ids]
+        return seek_and_limit(unblocked, after_rowid=after_rowid, limit=limit)
 
     def walk_subtree(
-        self, *, session_id: str, root_id: str
+        self, *, session_id: str, root_id: str, include_rowid: bool = False
     ) -> list[sqlite3.Row]:
         """Return all descendants of a root, depth-first pre-order.
 
         Iterative DFS to avoid Python recursion limit on deep chains
         (sys.getrecursionlimit() defaults to ~1000; DPD chains can exceed).
         Children at each level are ordered by (created_at, id).
+
+        ``include_rowid=True`` selects ``rowid, *`` so callers that need
+        rowid-based keyset pagination (``list_open_nodes`` root path) can
+        receive the implicit rowid without a second query. Default ``False``
+        preserves the original ``SELECT *`` behavior for all other callers
+        (they never see a ``rowid`` key).
         """
         # Each frontier entry is either:
         #   ("expand", parent_id, parent_kind)  — fetch children, schedule them
         #   ("emit",   node_row)                — append this row to result
         # On pop, "expand" frames fetch children and push, in REVERSE order, a
         # paired (emit, expand) for each child. This gives pre-order DFS.
+        col_clause = "rowid, *" if include_rowid else "*"
         with self.connect() as conn:
             result: list[sqlite3.Row] = []
             frontier: list[tuple] = [("expand", root_id, "root")]
@@ -1394,8 +1430,8 @@ class Storage:
                     continue
                 _, parent_id, parent_kind = frame
                 children = conn.execute(
-                    """
-                    SELECT * FROM nodes
+                    f"""
+                    SELECT {col_clause} FROM nodes
                     WHERE session_id = ?
                       AND parent_id = ?
                       AND parent_kind = ?

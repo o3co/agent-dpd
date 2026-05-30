@@ -371,7 +371,11 @@ async def list_tools() -> list[types.Tool]:
             description=(
                 "Return open nodes in the session, optionally restricted to one root's "
                 "subtree and/or filtered by the state column. Powers next_focus "
-                "selection (deepest-within after recency-ranked root)."
+                "selection (deepest-within after recency-ranked root). "
+                "By default returns a summary projection "
+                "{id,type,text,parent_id,parent_kind,state,severity} and a single page "
+                "of up to 50 nodes with next_cursor for continuation; pass fields='*' "
+                "for the full row."
             ),
             inputSchema={
                 "type": "object",
@@ -388,6 +392,38 @@ async def list_tools() -> list[types.Tool]:
                             "Optional filter on the state column "
                             "(e.g. 'active', 'closed', 'deletable'). "
                             "Omit to return all open nodes regardless of state."
+                        ),
+                    },
+                    "type": {
+                        "type": ["string", "null"],
+                        "description": "Optional filter on node type (e.g. 'question').",
+                    },
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "description": "Max nodes per page (1..200, default 50).",
+                    },
+                    "cursor": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "Opaque pagination cursor from a prior call's next_cursor. "
+                            "Valid only for the same filter args; changing filters requires "
+                            "restarting without a cursor."
+                        ),
+                    },
+                    "fields": {
+                        "type": ["string", "array", "null"],
+                        "items": {"type": "string"},
+                        "description": (
+                            "Projection: omit/null = summary "
+                            "{id,type,text,parent_id,parent_kind,state,severity}; "
+                            "'*' = all columns; or a list of column names."
+                        ),
+                    },
+                    "text_preview": {
+                        "type": ["integer", "null"],
+                        "description": (
+                            "If set (>0), truncate each text to N chars and add "
+                            "text_truncated + text_len. Default: full text."
                         ),
                     },
                     "agent_scope": {
@@ -646,7 +682,11 @@ async def list_tools() -> list[types.Tool]:
                 "given edge type (default 'blocks'; directional convention: "
                 "edge.from blocks edge.to). Useful for next_focus selection when "
                 "explicit dependency edges have been declared. Optionally "
-                "restrict to one root's subtree."
+                "restrict to one root's subtree. "
+                "By default returns a summary projection "
+                "{id,type,text,parent_id,parent_kind,state,severity} and a single page "
+                "of up to 50 nodes with next_cursor for continuation; pass fields='*' "
+                "for the full row."
             ),
             inputSchema={
                 "type": "object",
@@ -657,9 +697,49 @@ async def list_tools() -> list[types.Tool]:
                         "type": ["string", "null"],
                         "description": "If given, restrict to this root's subtree.",
                     },
+                    "state": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "Optional filter on the state column "
+                            "(e.g. 'active', 'closed', 'deletable'). "
+                            "Omit to return all open nodes regardless of state."
+                        ),
+                    },
                     "blocker_edge_type": {
                         "type": ["string", "null"],
                         "description": "Edge type that counts as a blocker. Defaults to 'blocks'.",
+                    },
+                    "type": {
+                        "type": ["string", "null"],
+                        "description": "Optional filter on node type (e.g. 'question').",
+                    },
+                    "limit": {
+                        "type": ["integer", "null"],
+                        "description": "Max nodes per page (1..200, default 50).",
+                    },
+                    "cursor": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "Opaque pagination cursor from a prior call's next_cursor. "
+                            "Valid only for the same filter args; changing filters requires "
+                            "restarting without a cursor."
+                        ),
+                    },
+                    "fields": {
+                        "type": ["string", "array", "null"],
+                        "items": {"type": "string"},
+                        "description": (
+                            "Projection: omit/null = summary "
+                            "{id,type,text,parent_id,parent_kind,state,severity}; "
+                            "'*' = all columns; or a list of column names."
+                        ),
+                    },
+                    "text_preview": {
+                        "type": ["integer", "null"],
+                        "description": (
+                            "If set (>0), truncate each text to N chars and add "
+                            "text_truncated + text_len. Default: full text."
+                        ),
                     },
                     "agent_scope": {
                         "type": ["string", "null"],

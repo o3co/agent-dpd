@@ -7,6 +7,26 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-05-30
+
+### BREAKING CHANGES
+
+- `list_open_nodes` / `list_unblocked_open_nodes` now default to a **summary
+  projection** (`{id,type,text,parent_id,parent_kind,state,severity}`) and a
+  **single page of up to 50** nodes, returning `next_cursor`. Previously both
+  returned every open node as a full 19-column row.
+  - Full row: pass `fields="*"`. All nodes: follow `next_cursor` until null
+    (or raise `limit`, max 200, per page).
+  - New params on both tools: `type`, `limit`, `cursor`, `fields`, `text_preview`.
+  - Pagination is keyset on an opaque cursor; a cursor is valid only for the
+    same filter args (changing session_id/root_id/state/type — or blocker_edge_type for the
+    unblocked tool — invalidates it).
+
+### Added
+
+- `pagination` module: opaque rowid cursors, limit validation, row projection.
+- `list_unblocked_open_nodes` gains a `state` filter (parity with `list_open_nodes`).
+
 ## [0.10.2] — 2026-05-29
 
 ### Fixed
