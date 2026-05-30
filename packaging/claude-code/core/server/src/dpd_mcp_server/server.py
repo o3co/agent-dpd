@@ -1307,6 +1307,54 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="export_sql",
+            title="Export SQL (faithful whole-DB serialize)",
+            description=(
+                "Serialize the entire scope database to restorable SQL text "
+                "(faithful, lossless). Non-destructive — the DB is read, never "
+                "written. The derived FTS index is excluded and rebuilt on "
+                "restore. Returns the dump text plus byte size. Use for backup "
+                "and portability; export_yaml remains the readable projection."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "exported_by": {
+                        "type": ["string", "null"],
+                        "description": "Optional provenance label recorded in the export_meta manifest.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="import_sql",
+            title="Import SQL (whole-DB replace — emits commands)",
+            description=(
+                "Restore a faithful SQL dump by replacing the whole scope DB. "
+                "This is destructive, so the tool does NOT execute anything — it "
+                "returns the exact commands (restore → forward-only migrate + "
+                "FTS reindex → swap) for a human to run after stopping the server."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["dump_path"],
+                "properties": {
+                    "dump_path": {
+                        "type": "string",
+                        "description": "Path to the .sql dump produced by export_sql.",
+                    },
+                    "agent_scope": {
+                        "type": ["string", "null"],
+                        "description": "Optional override for the agent scope encoded directory name. Bypasses MCP roots/list.",
+                    },
+                },
+            },
+        ),
     ]
     by_name = {t.name: t for t in tools}
     for old, new in LEGACY_ALIASES.items():
@@ -1401,6 +1449,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         )
     if name == "export_yaml":
         return tools.export_yaml(storage=storage, arguments=tool_args)
+    if name == "export_sql":
+        return tools.export_sql(storage=storage, arguments=tool_args, now=now)
+    if name == "import_sql":
+        return tools.import_sql(storage=storage, arguments=tool_args)
     if name == "resolve_hypothesis_branch":
         return tools.resolve_hypothesis_branch(
             storage=storage, arguments=tool_args, now=now, new_id=new_id

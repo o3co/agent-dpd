@@ -6,6 +6,7 @@ Tools never construct SQL directly — they call methods here.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from contextlib import contextmanager
 from importlib.resources import files
@@ -13,11 +14,34 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
+def _schema_version() -> int:
+    """The current schema version, parsed from ``schema.sql``'s trailing
+    ``PRAGMA user_version = N``.
+
+    schema.sql is the single source of truth for the version a freshly-opened
+    DB carries; deriving the constant here keeps the restore guard in
+    ``migrate.py`` from drifting when the schema bumps (#74 review).
+    """
+    schema = files("dpd_mcp_server").joinpath("schema.sql").read_text()
+    matches = re.findall(r"PRAGMA\s+user_version\s*=\s*(\d+)", schema)
+    if not matches:
+        raise RuntimeError("schema.sql has no `PRAGMA user_version = N`")
+    return int(matches[-1])
+
+
+SCHEMA_VERSION = _schema_version()
+
+
 class Storage:
     """Handle to a per-agent-scope sqlite database."""
 
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
+
+    @property
+    def db_path(self) -> str:
+        """Filesystem path of the backing sqlite database."""
+        return self._db_path
 
     @classmethod
     def open(cls, db_path: str) -> "Storage":
@@ -2086,6 +2110,94 @@ class Storage:
                         next_frontier.append(c["id"])
             frontier = next_frontier
         return members
+
+    def export_sql(self, *, now: str, exported_by: str | None = None) -> str:
+        """Serialize the whole database to faithful SQL text. Non-destructive.
+
+        The source DB is read but never written (the dump is built from an
+        in-memory copy). The FTS index (``subgraphs_fts`` + its internal shadow
+        tables) is excluded — it is derived and rebuilt on restore via
+        ``python -m dpd_mcp_server.migrate``. A synthetic ``export_meta``
+        manifest row (schema version, scopes, session/root ids, counts,
+        timestamp) is embedded so the artifact is self-describing.
+
+        Forward-only portability: the dump carries ``PRAGMA user_version`` so a
+        dump from an older schema, restored into a fresh sqlite and routed
+        through ``Storage.open``, runs the existing migration chain up to the
+        current schema (#60).
+        """
+        import json as _json
+
+        with self.connect() as conn:
+            mem = sqlite3.connect(":memory:")
+            try:
+                conn.backup(mem)
+                # Compute the manifest from the in-memory SNAPSHOT, not the live
+                # connection. If another DPD server writes to this WAL database
+                # between the metadata queries and conn.backup(), live-side
+                # counts/ids could describe a different state than the dumped
+                # body. Querying the snapshot makes the self-description exactly
+                # match the SQL it ships with (#60 / #74 review).
+                user_version = mem.execute(
+                    "PRAGMA user_version").fetchone()[0]
+                session_ids = [r[0] for r in mem.execute(
+                    "SELECT id FROM sessions ORDER BY id")]
+                root_ids = [r[0] for r in mem.execute(
+                    "SELECT id FROM roots ORDER BY id")]
+                scopes = [r[0] for r in mem.execute(
+                    "SELECT DISTINCT scope FROM ("
+                    " SELECT scope FROM sessions WHERE scope IS NOT NULL"
+                    " UNION SELECT scope FROM roots WHERE scope IS NOT NULL"
+                    ") ORDER BY scope")]
+                node_count = mem.execute(
+                    "SELECT COUNT(*) FROM nodes").fetchone()[0]
+                edge_count = mem.execute(
+                    "SELECT COUNT(*) FROM edges").fetchone()[0]
+                # Exclude the derived FTS index (rebuilt on restore) and any
+                # prior manifest, then embed a fresh manifest into the copy so
+                # iterdump emits a correctly-escaped INSERT for it.
+                mem.execute("DROP TABLE IF EXISTS subgraphs_fts")
+                mem.execute("DROP TABLE IF EXISTS export_meta")
+                mem.execute(
+                    "CREATE TABLE export_meta ("
+                    " schema_version INTEGER NOT NULL,"
+                    " exported_at    TEXT NOT NULL,"
+                    " exported_by    TEXT,"
+                    " scopes         TEXT,"
+                    " session_ids    TEXT,"
+                    " root_ids       TEXT,"
+                    " node_count     INTEGER,"
+                    " edge_count     INTEGER)"
+                )
+                mem.execute(
+                    "INSERT INTO export_meta (schema_version, exported_at, "
+                    "exported_by, scopes, session_ids, root_ids, node_count, "
+                    "edge_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (user_version, now, exported_by,
+                     _json.dumps(scopes), _json.dumps(session_ids),
+                     _json.dumps(root_ids), node_count, edge_count),
+                )
+                mem.commit()
+                body = "\n".join(mem.iterdump())
+            finally:
+                mem.close()
+
+        header = (
+            "-- DPD faithful SQL export (#60 portability)\n"
+            f"-- exported_at: {now}\n"
+            f"-- schema_version (user_version): {user_version}\n"
+            f"-- scopes: {', '.join(scopes) or '(none)'}\n"
+            f"-- sessions: {len(session_ids)}  roots: {len(root_ids)}  "
+            f"nodes: {node_count}  edges: {edge_count}\n"
+            "-- NOTE: FTS index (subgraphs_fts) excluded — derived; "
+            "rebuilt on restore.\n"
+            "-- Restore (whole-DB replace): sqlite3 NEW.sqlite < THIS.sql "
+            "&& <python> -m dpd_mcp_server.migrate NEW.sqlite\n"
+            "--   (use the interpreter that has dpd_mcp_server installed; "
+            "the import_sql tool emits the exact command)\n"
+            f"PRAGMA user_version = {user_version};\n"
+        )
+        return header + body + "\n"
 
     def dump_persist_subgraph(
         self, *, session_id: str, start_node_id: str,
