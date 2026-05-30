@@ -7,6 +7,33 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-05-30
+
+### Added
+
+- **Faithful SQL export + restore** (#60). `export_sql` serializes the whole
+  scope database to restorable SQL text — lossless (state, closure_reason,
+  provenance, timestamps, edge layers, `edge_verifications`, pool items, notes
+  all round-trip), non-destructive (the source DB is read, never written), and
+  MCP-safe. The derived FTS index (`subgraphs_fts`) is excluded as the dump's
+  one lossy omission and rebuilt on restore. An embedded `export_meta` manifest
+  (schema version, scopes, session/root ids, counts) — computed from the
+  in-memory backup snapshot so it always matches the dumped body — makes the
+  artifact self-describing, and the dump carries `PRAGMA user_version` for
+  forward-only portability.
+- **`python -m dpd_mcp_server.migrate <db>`** — standalone restore entry point.
+  Routes a restored dump through the existing forward-only migration chain
+  (`Storage.open`) and rebuilds the FTS index. Rejects a dump whose schema is
+  newer than the running build (downgrade unsupported, by design). The version
+  guard is derived from `schema.sql` (via `storage.SCHEMA_VERSION`) so it
+  cannot drift from the schema on a future bump.
+- **`import_sql`** — emits the exact restore commands (restore → migrate →
+  swap) for the destructive whole-DB-replace path without executing anything;
+  a human runs them after stopping the server. The migrate command uses the
+  running interpreter (`sys.executable`) so it resolves `dpd_mcp_server` under
+  the plugin venv. The non-destructive additive re-tag ingest path is
+  deliberately deferred to a follow-up (see #60).
+
 ## [0.11.0] — 2026-05-30
 
 ### BREAKING CHANGES

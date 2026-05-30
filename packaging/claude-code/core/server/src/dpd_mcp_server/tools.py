@@ -987,6 +987,65 @@ def bulk_import_subgraph(
     )
 
 
+def export_sql(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+    now: str,
+) -> dict[str, Any]:
+    """Faithful whole-DB SQL serialization (non-destructive).
+
+    Reads the entire scope database and returns it as restorable SQL text with
+    an embedded ``export_meta`` manifest. The source DB is never written. The
+    derived FTS index is excluded and rebuilt on restore. See #60.
+    """
+    exported_by = arguments.get("exported_by") or None
+    sql = storage.export_sql(now=now, exported_by=exported_by)
+    return {"sql": sql, "bytes": len(sql.encode("utf-8"))}
+
+
+def import_sql(
+    *,
+    storage: Storage,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Emit the commands to restore a faithful SQL dump (whole-DB replace).
+
+    Does NOT execute anything: a whole-DB restore replaces the entire scope DB
+    (destructive), so the agent only surfaces the exact commands for a human to
+    run. The migrate step routes an older dump through the forward-only
+    migration chain and rebuilds the FTS index (#60).
+    """
+    import shlex
+    import sys
+
+    dump_path = _required(arguments, "dump_path")
+    db_path = storage.db_path
+    restored = f"{db_path}.import.sqlite"
+    # Emit the *current* interpreter, not bare `python`. Under the Claude Code
+    # plugin install, `dpd_mcp_server` lives only in the plugin venv; a bare
+    # `python` on the user's PATH would fail with `No module named
+    # dpd_mcp_server`, breaking the advertised restore (#60 / #74 review).
+    python = shlex.quote(sys.executable)
+    commands = [
+        f"sqlite3 {shlex.quote(restored)} < {shlex.quote(dump_path)}",
+        f"{python} -m dpd_mcp_server.migrate {shlex.quote(restored)}",
+        f"mv {shlex.quote(restored)} {shlex.quote(db_path)}",
+    ]
+    return {
+        "destructive": True,
+        "db_path": db_path,
+        "dump_path": dump_path,
+        "commands": commands,
+        "instructions": (
+            "Whole-DB replace is destructive — it overwrites the entire scope "
+            "database. Stop the DPD server, then run these commands in order. "
+            "Forward-only: a dump from a schema newer than this build is "
+            "rejected by the migrate step."
+        ),
+    }
+
+
 def set_session_mode(
     *,
     storage: Storage,
