@@ -352,3 +352,34 @@ def test_list_notes_dispatched_by_call_tool(tmp_path, monkeypatch) -> None:
         {"session_id": "s", "agent_scope": "test-scope"},
     ))
     assert result == {"notes": []}
+
+
+def test_list_open_nodes_schema_declares_pagination_params() -> None:
+    """#62: list_open_nodes inputSchema must declare pagination/projection params."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+
+    tools = asyncio.run(list_tools())
+    tool = next(t for t in tools if t.name == "list_open_nodes")
+    props = tool.inputSchema["properties"]
+    assert {"type", "limit", "cursor", "fields", "text_preview"} <= set(props), (
+        f"missing pagination/projection keys in list_open_nodes schema; "
+        f"got: {sorted(props)}"
+    )
+
+
+def test_list_unblocked_open_nodes_schema_declares_pagination_params() -> None:
+    """#62: list_unblocked_open_nodes inputSchema must declare pagination/projection params."""
+    import asyncio
+    from dpd_mcp_server.server import list_tools
+
+    tools = asyncio.run(list_tools())
+    tool = next(t for t in tools if t.name == "list_unblocked_open_nodes")
+    props = tool.inputSchema["properties"]
+    assert {"type", "limit", "cursor", "fields", "text_preview"} <= set(props), (
+        f"missing pagination/projection keys in list_unblocked_open_nodes schema; "
+        f"got: {sorted(props)}"
+    )
+    assert "state" in props, (
+        f"list_unblocked_open_nodes schema missing 'state' param; got: {sorted(props)}"
+    )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from dpd_mcp_server.pagination import SUMMARY_FIELDS
 from dpd_mcp_server.storage import Storage
 from dpd_mcp_server.tools import (
     resolve_branch,
@@ -18,6 +19,7 @@ from dpd_mcp_server.tools import (
     list_edges,
     list_open_nodes,
     list_sessions,
+    list_unblocked_open_nodes,
     set_focus,
     set_root_lifecycle,
     spawn_root,
@@ -2586,3 +2588,139 @@ def test_find_similar_requires_query(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     with pytest.raises(ValueError):
         find_similar(storage=storage, arguments={})
+
+
+# ---------------------------------------------------------------------------
+# Task 5: list_open_nodes pagination + projection
+# ---------------------------------------------------------------------------
+
+
+def _seed_open(storage, sid, n, root="root_a"):
+    for i in range(n):
+        add_node(storage=storage,
+                 arguments={"session_id": sid, "parent_id": root,
+                            "type": "question", "text": f"body-{i}"},
+                 now="2026-05-20T10:01:00Z", new_id=lambda p, _i=i: f"n{_i}")
+
+
+def test_list_open_nodes_default_is_summary_shape(storage):
+    sid = _start_with_root(storage)
+    _seed_open(storage, sid, 1)
+    result = list_open_nodes(storage=storage, arguments={"session_id": sid})
+    assert "next_cursor" in result
+    node = result["nodes"][0]
+    assert set(node) <= set(SUMMARY_FIELDS)
+    assert "session_id" not in node and "rowid" not in node
+
+
+def test_list_open_nodes_default_limit_and_next_cursor(storage):
+    sid = _start_with_root(storage)
+    _seed_open(storage, sid, 55)
+    result = list_open_nodes(storage=storage, arguments={"session_id": sid})
+    assert len(result["nodes"]) == 50
+    assert result["next_cursor"] is not None
+    page2 = list_open_nodes(storage=storage,
+                            arguments={"session_id": sid,
+                                       "cursor": result["next_cursor"]})
+    assert len(page2["nodes"]) == 5
+    assert page2["next_cursor"] is None
+
+
+def test_list_open_nodes_next_cursor_null_at_exact_limit(storage):
+    sid = _start_with_root(storage)
+    _seed_open(storage, sid, 50)
+    result = list_open_nodes(storage=storage,
+                             arguments={"session_id": sid, "limit": 50})
+    assert len(result["nodes"]) == 50
+    assert result["next_cursor"] is None
+
+
+def test_list_open_nodes_fields_star_returns_full_row(storage):
+    sid = _start_with_root(storage)
+    _seed_open(storage, sid, 1)
+    result = list_open_nodes(storage=storage,
+                             arguments={"session_id": sid, "fields": "*"})
+    assert "session_id" in result["nodes"][0]
+    assert "rowid" not in result["nodes"][0]
+
+
+def test_list_open_nodes_text_preview(storage):
+    sid = _start_with_root(storage)
+    add_node(storage=storage,
+             arguments={"session_id": sid, "parent_id": "root_a",
+                        "type": "question", "text": "x" * 30},
+             now="2026-05-20T10:01:00Z", new_id=lambda p: "long")
+    result = list_open_nodes(storage=storage,
+                             arguments={"session_id": sid, "text_preview": 5})
+    n = result["nodes"][0]
+    assert n["text"] == "xxxxx" and n["text_truncated"] is True and n["text_len"] == 30
+
+
+def test_list_open_nodes_cursor_rejects_filter_change(storage):
+    sid = _start_with_root(storage)
+    _seed_open(storage, sid, 55)
+    result = list_open_nodes(storage=storage, arguments={"session_id": sid})
+    with pytest.raises(ValueError):
+        list_open_nodes(storage=storage,
+                        arguments={"session_id": sid,
+                                   "cursor": result["next_cursor"],
+                                   "state": "active"})
+
+
+# ---------------------------------------------------------------------------
+# Task 6: list_unblocked_open_nodes pagination + projection
+# ---------------------------------------------------------------------------
+
+
+def test_list_unblocked_open_nodes_paginates_and_summarizes(storage):
+    sid = _start_with_root(storage)
+    _seed_open(storage, sid, 55)
+    result = list_unblocked_open_nodes(storage=storage,
+                                       arguments={"session_id": sid})
+    assert len(result["nodes"]) == 50
+    assert result["next_cursor"] is not None
+    assert set(result["nodes"][0]) <= set(SUMMARY_FIELDS)
+    page2 = list_unblocked_open_nodes(
+        storage=storage,
+        arguments={"session_id": sid, "cursor": result["next_cursor"]})
+    assert len(page2["nodes"]) == 5
+
+
+def test_list_unblocked_cursor_includes_blocker_edge_type(storage):
+    sid = _start_with_root(storage)
+    _seed_open(storage, sid, 55)
+    result = list_unblocked_open_nodes(storage=storage,
+                                       arguments={"session_id": sid})
+    with pytest.raises(ValueError):
+        list_unblocked_open_nodes(
+            storage=storage,
+            arguments={"session_id": sid, "cursor": result["next_cursor"],
+                       "blocker_edge_type": "requires"})
+
+
+def test_list_open_nodes_cursor_rejects_cross_session_reuse(storage):
+    sid_a = _start_with_root(storage)
+    _seed_open(storage, sid_a, 55)
+    result = list_open_nodes(storage=storage, arguments={"session_id": sid_a})
+    assert result["next_cursor"] is not None
+    # A second session with the SAME (default) filters must reject sid_a's cursor.
+    storage.insert_session(session_id="ses_other", scope=None, label=None,
+                           now="2026-05-20T10:00:00Z")
+    storage.insert_root(root_id="root_other", session_id="ses_other", topic="t",
+                        now="2026-05-20T10:00:00Z")
+    with pytest.raises(ValueError):
+        list_open_nodes(storage=storage,
+                        arguments={"session_id": "ses_other",
+                                   "cursor": result["next_cursor"]})
+
+
+def test_list_open_nodes_empty_session(storage):
+    sid = _start_with_root(storage)
+    result = list_open_nodes(storage=storage, arguments={"session_id": sid})
+    assert result == {"nodes": [], "next_cursor": None}
+
+
+def test_list_unblocked_open_nodes_empty_session(storage):
+    sid = _start_with_root(storage)
+    result = list_unblocked_open_nodes(storage=storage, arguments={"session_id": sid})
+    assert result == {"nodes": [], "next_cursor": None}

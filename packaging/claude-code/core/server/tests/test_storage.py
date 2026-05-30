@@ -3269,3 +3269,150 @@ def test_open_v4_db_runs_v4_to_v5_backfill(tmp_db_path: str) -> None:
         ).fetchone()
     assert version == 8
     assert anchor is not None and "OPEN-AGAIN" in anchor[0]
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — list_open_nodes: rowid, type filter, seek, limit
+# ---------------------------------------------------------------------------
+
+
+def _seed_open_chain(storage, sid, n, root="root_a"):
+    """Insert n open question nodes under root, ids n0..n{n-1}, return them."""
+    ids = []
+    for i in range(n):
+        nid = f"n{i}"
+        storage.insert_node(
+            node_id=nid, session_id=sid, node_type="question",
+            text=f"body-{i}", parent_id=root, parent_kind="root",
+            now="2026-05-20T10:00:00Z",
+        )
+        ids.append(nid)
+    return ids
+
+
+def test_list_open_nodes_emits_rowid_in_ascending_order(tmp_db_path):
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-20T10:00:00Z")
+    storage.insert_root(root_id="root_a", session_id="ses_1", topic="t",
+                        now="2026-05-20T10:00:00Z")
+    _seed_open_chain(storage, "ses_1", 3)
+    rows = storage.list_open_nodes(session_id="ses_1")
+    rowids = [r["rowid"] for r in rows]
+    assert rowids == sorted(rowids)
+    assert len(rowids) == 3
+
+
+def test_list_open_nodes_after_rowid_and_limit(tmp_db_path):
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-20T10:00:00Z")
+    storage.insert_root(root_id="root_a", session_id="ses_1", topic="t",
+                        now="2026-05-20T10:00:00Z")
+    _seed_open_chain(storage, "ses_1", 5)
+    page1 = storage.list_open_nodes(session_id="ses_1", limit=2)
+    assert len(page1) == 2
+    after = page1[-1]["rowid"]
+    page2 = storage.list_open_nodes(session_id="ses_1", after_rowid=after, limit=2)
+    assert [r["rowid"] for r in page2] == \
+        [r["rowid"] for r in storage.list_open_nodes(session_id="ses_1")][2:4]
+
+
+def test_list_open_nodes_filters_by_type(tmp_db_path):
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-20T10:00:00Z")
+    storage.insert_root(root_id="root_a", session_id="ses_1", topic="t",
+                        now="2026-05-20T10:00:00Z")
+    storage.insert_node(node_id="q1", session_id="ses_1", node_type="question",
+                        text="q", parent_id="root_a", parent_kind="root",
+                        now="2026-05-20T10:00:00Z")
+    storage.insert_node(node_id="h1", session_id="ses_1", node_type="hypothesis",
+                        text="h", parent_id="root_a", parent_kind="root",
+                        now="2026-05-20T10:00:00Z")
+    rows = storage.list_open_nodes(session_id="ses_1", node_type="hypothesis")
+    assert [r["id"] for r in rows] == ["h1"]
+
+
+def test_list_open_nodes_root_path_emits_rowid_and_paginates(tmp_db_path):
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-20T10:00:00Z")
+    storage.insert_root(root_id="root_a", session_id="ses_1", topic="t",
+                        now="2026-05-20T10:00:00Z")
+    storage.insert_root(root_id="root_b", session_id="ses_1", topic="t2",
+                        now="2026-05-20T10:00:00Z")
+    _seed_open_chain(storage, "ses_1", 3, root="root_a")
+    storage.insert_node(node_id="zb", session_id="ses_1", node_type="question",
+                        text="other", parent_id="root_b", parent_kind="root",
+                        now="2026-05-20T10:00:00Z")
+    rows = storage.list_open_nodes(session_id="ses_1", root_id="root_a", limit=2)
+    assert len(rows) == 2
+    assert all(r["rowid"] is not None for r in rows)
+    assert "zb" not in {r["id"] for r in rows}
+
+
+# ---------------------------------------------------------------------------
+# Task 3b — root-path pagination via walk_subtree+Python (no IN clause)
+# ---------------------------------------------------------------------------
+
+
+def test_list_open_nodes_root_path_paginates_across_pages_without_in_clause(tmp_db_path):
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-20T10:00:00Z")
+    storage.insert_root(root_id="root_a", session_id="ses_1", topic="t",
+                        now="2026-05-20T10:00:00Z")
+    for i in range(60):
+        storage.insert_node(node_id=f"n{i}", session_id="ses_1",
+                            node_type="question", text=f"b{i}",
+                            parent_id="root_a", parent_kind="root",
+                            now="2026-05-20T10:00:00Z")
+    page1 = storage.list_open_nodes(session_id="ses_1", root_id="root_a", limit=50)
+    assert len(page1) == 50
+    assert all("rowid" in r.keys() for r in page1)
+    after = page1[-1]["rowid"]
+    page2 = storage.list_open_nodes(session_id="ses_1", root_id="root_a",
+                                    after_rowid=after, limit=50)
+    assert len(page2) == 10
+    # union of the two pages == all 60, no overlap
+    ids = [r["id"] for r in page1] + [r["id"] for r in page2]
+    assert len(set(ids)) == 60
+
+
+def test_walk_subtree_default_does_not_expose_rowid(tmp_db_path):
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-20T10:00:00Z")
+    storage.insert_root(root_id="root_a", session_id="ses_1", topic="t",
+                        now="2026-05-20T10:00:00Z")
+    storage.insert_node(node_id="n0", session_id="ses_1", node_type="question",
+                        text="b", parent_id="root_a", parent_kind="root",
+                        now="2026-05-20T10:00:00Z")
+    rows = storage.walk_subtree(session_id="ses_1", root_id="root_a")
+    assert all("rowid" not in r.keys() for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — list_unblocked_open_nodes: unblock first, then seek+limit
+# ---------------------------------------------------------------------------
+
+
+def test_list_unblocked_paginates_final_unblocked_set(tmp_db_path):
+    """limit applies to the unblocked result, not to candidates-then-unblock."""
+    storage = Storage.open(tmp_db_path)
+    storage.insert_session(session_id="ses_1", scope=None, label=None,
+                           now="2026-05-20T10:00:00Z")
+    storage.insert_root(root_id="root_a", session_id="ses_1", topic="t",
+                        now="2026-05-20T10:00:00Z")
+    _seed_open_chain(storage, "ses_1", 5)
+    storage.add_edge(session_id="ses_1", from_node="root_a", to_node="n0",
+                     edge_type="blocks", reason=None, now="2026-05-20T10:00:00Z")
+    storage.add_edge(session_id="ses_1", from_node="root_a", to_node="n1",
+                     edge_type="blocks", reason=None, now="2026-05-20T10:00:00Z")
+    page = storage.list_unblocked_open_nodes(session_id="ses_1", limit=2)
+    assert [r["id"] for r in page] == ["n2", "n3"]
+    after = page[-1]["rowid"]
+    page2 = storage.list_unblocked_open_nodes(session_id="ses_1",
+                                              after_rowid=after, limit=2)
+    assert [r["id"] for r in page2] == ["n4"]

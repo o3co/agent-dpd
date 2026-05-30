@@ -8,10 +8,18 @@ server module wires them into MCP `@app.call_tool` handlers.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from .storage import Storage
+from .pagination import (
+    decode_cursor,
+    encode_cursor,
+    make_filter_key,
+    project,
+    validate_limit,
+    validate_projection,
+)
 
 
 _VALID_SESSION_MODES = {"entry", "ambient", "idle"}
@@ -285,8 +293,23 @@ def list_open_nodes(
     session_id = _required(arguments, "session_id")
     root_id = arguments.get("root_id") or None
     state = arguments.get("state") or None
-    rows = storage.list_open_nodes(session_id=session_id, root_id=root_id, state=state)
-    return {"nodes": [_row_to_dict(r) for r in rows]}
+    node_type = arguments.get("type") or None
+    fields = arguments.get("fields")
+    text_preview = arguments.get("text_preview")
+    limit = validate_limit(arguments.get("limit"))
+    validate_projection(fields, text_preview)
+    filter_key = make_filter_key(root_id=root_id, state=state, node_type=node_type, session_id=session_id)
+    cursor = arguments.get("cursor")
+    after_rowid = decode_cursor(cursor, filter_key) if cursor else None
+
+    rows = storage.list_open_nodes(
+        session_id=session_id, root_id=root_id, state=state,
+        node_type=node_type, after_rowid=after_rowid, limit=limit + 1,
+    )
+    return _paginated_open_node_result(
+        rows=rows, filter_key=filter_key, limit=limit,
+        fields=fields, text_preview=text_preview,
+    )
 
 
 def add_edge(
@@ -425,12 +448,29 @@ def list_unblocked_open_nodes(
 ) -> dict[str, Any]:
     session_id = _required(arguments, "session_id")
     root_id = arguments.get("root_id") or None
+    state = arguments.get("state") or None
+    node_type = arguments.get("type") or None
     blocker_edge_type = arguments.get("blocker_edge_type") or "blocks"
+    fields = arguments.get("fields")
+    text_preview = arguments.get("text_preview")
+    limit = validate_limit(arguments.get("limit"))
+    validate_projection(fields, text_preview)
+    filter_key = make_filter_key(
+        root_id=root_id, state=state, node_type=node_type,
+        blocker_edge_type=blocker_edge_type, session_id=session_id,
+    )
+    cursor = arguments.get("cursor")
+    after_rowid = decode_cursor(cursor, filter_key) if cursor else None
+
     rows = storage.list_unblocked_open_nodes(
         session_id=session_id, root_id=root_id,
-        blocker_edge_type=blocker_edge_type,
+        blocker_edge_type=blocker_edge_type, state=state, node_type=node_type,
+        after_rowid=after_rowid, limit=limit + 1,
     )
-    return {"nodes": [_row_to_dict(r) for r in rows]}
+    return _paginated_open_node_result(
+        rows=rows, filter_key=filter_key, limit=limit,
+        fields=fields, text_preview=text_preview,
+    )
 
 
 def purge_session(
@@ -1047,3 +1087,19 @@ def _required(arguments: dict[str, Any], key: str) -> Any:
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
+
+
+def _paginated_open_node_result(
+    *, rows: Sequence[Mapping[str, Any]], filter_key: str, limit: int, fields: Any, text_preview: int | None
+) -> dict[str, Any]:
+    """Apply the limit+1 sentinel and project rows. `rows` was fetched with
+    limit+1; a surplus row means there is a next page. Projection strips rowid."""
+    if len(rows) > limit:
+        next_cursor = encode_cursor(rows[limit - 1]["rowid"], filter_key)
+        rows = rows[:limit]
+    else:
+        next_cursor = None
+    return {
+        "nodes": [project(r, fields=fields, text_preview=text_preview) for r in rows],
+        "next_cursor": next_cursor,
+    }

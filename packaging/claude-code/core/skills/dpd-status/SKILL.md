@@ -41,7 +41,9 @@ Extract:
 list_open_nodes(session_id=<session_id>)
 ```
 
-Returns all open (non-closed) nodes in the session.
+Returns a summary projection (`{id,type,text,parent_id,parent_kind,state,severity}`) of up to 50
+open nodes, plus `next_cursor`. Follow `next_cursor` (repeat call with `cursor=<value>`) until null
+to retrieve all pages. Pass `fields="*"` for full rows if needed.
 
 ### 3. Active Pool
 

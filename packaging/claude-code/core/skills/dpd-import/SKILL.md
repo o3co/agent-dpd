@@ -149,7 +149,7 @@ After `bulk_import_subgraph` returns, **propose edges from the imported nodes to
 
 Pattern:
 
-1. Enumerate open `question` / `hypothesis` nodes in the focus subgraph (`list_open_nodes`).
+1. Enumerate open `question` / `hypothesis` nodes in the focus subgraph (`list_open_nodes`, e.g. `type="question"` then `type="hypothesis"`). Since v0.11 this is paginated (50/page) — follow `next_cursor` until null to cover a large subtree.
 2. For each, identify the top 1–3 imported nodes most likely to support, contradict, qualify, or provide derivation evidence (`derived_from`, `supports`, `contradicts`, `qualifies`).
 3. Present as a bulk proposal:
 
