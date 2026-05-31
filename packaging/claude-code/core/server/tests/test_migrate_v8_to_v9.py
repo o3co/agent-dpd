@@ -89,6 +89,13 @@ def test_migrate_bumps_version_and_drops_type_check(tmp_path: Path) -> None:
 
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+        # Seed the referenced session so the raw insert satisfies the
+        # nodes.session_id FK (no reliance on FK enforcement being off).
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, updated_at) "
+            "VALUES ('ses_raw', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')"
+        )
         # Raw INSERT (bypassing Storage) of a type the OLD CHECK rejected now
         # succeeds — direct proof the DB-level CHECK is gone. The app-code
         # NODE_TYPES guard still rejects it on the Storage path (tested

@@ -140,13 +140,15 @@ async def list_tools() -> list[types.Tool]:
                     "type": {
                         "type": "string",
                         "description": (
-                            "Node type. v2 types: question, answer, hypothesis, "
-                            "evidence, decision, rationale. "
-                            "v3 additions: start, end. "
-                            "#63 spec-import additions: claim (a factual/"
-                            "propositional assertion), requirement (a normative "
-                            "MUST/SHOULD), open_question (a recorded unresolved "
-                            "question)."
+                            "Node type — one of the canonical vocabulary "
+                            "(Storage.NODE_TYPES; validated app-side, an unknown "
+                            "type is rejected): question, plan, hypothesis, goal, "
+                            "problem, answer, action, verification, decision, "
+                            "resolution, evidence, constraint, assumption, "
+                            "rationale, risk; start / end (subgraph anchors); "
+                            "claim / requirement / open_question (#63 spec-import: "
+                            "factual assertion / normative MUST-SHOULD / recorded "
+                            "open question)."
                         ),
                     },
                     "text": {"type": "string"},
