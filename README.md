@@ -37,7 +37,7 @@ That adds the `agent-market` marketplace and installs the `dpd` plugin from it. 
 
 Plugin body lives at `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (concretely: `~/.claude/plugins/cache/agent-market/dpd/0.7.0/`); persistent venv at `~/.claude/plugins/data/<plugin>-<marketplace>/.venv/` (concretely: `~/.claude/plugins/data/dpd-agent-market/.venv/`). The venv path is what Claude Code passes as `${CLAUDE_PLUGIN_DATA}` to the SessionStart hook.
 
-To update: `/plugin update dpd` (or rely on Claude Code's auto-update) — this updates the plugin's bundled source, and the SessionStart hook will rebuild the venv on the next session via its pyproject.toml-hash check. Do **not** `pip install -U dpd-mcp-server` inside the plugin's venv directly: the hook will not notice the manual upgrade (it only rebuilds on bundled-source changes), and the venv will silently desync from the plugin source. If you need a clean venv, delete `~/.claude/plugins/data/dpd-agent-market/.venv/` and restart Claude Code — the hook will rebuild it.
+To update: `/plugin update dpd` (or rely on Claude Code's auto-update) — this updates the plugin's bundled source, and the SessionStart hook will rebuild the venv on the next session via its hash check over the bundled `pyproject.toml` + `.claude-plugin/plugin.json`. Do **not** `pip install -U dpd-mcp-server` inside the plugin's venv directly: the hook will not notice the manual upgrade (it only rebuilds on bundled-source changes), and the venv will silently desync from the plugin source. If you need a clean venv, delete `~/.claude/plugins/data/dpd-agent-market/.venv/` and restart Claude Code — the hook will rebuild it.
 
 ### Cursor
 
