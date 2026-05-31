@@ -142,7 +142,11 @@ async def list_tools() -> list[types.Tool]:
                         "description": (
                             "Node type. v2 types: question, answer, hypothesis, "
                             "evidence, decision, rationale. "
-                            "v3 additions: start, end."
+                            "v3 additions: start, end. "
+                            "#63 spec-import additions: claim (a factual/"
+                            "propositional assertion), requirement (a normative "
+                            "MUST/SHOULD), open_question (a recorded unresolved "
+                            "question)."
                         ),
                     },
                     "text": {"type": "string"},

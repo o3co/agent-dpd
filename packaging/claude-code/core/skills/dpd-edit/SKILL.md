@@ -123,6 +123,7 @@ When adding nodes, use one of these types:
 | Solution (close) | `answer`, `action`, `verification`, `decision`, `resolution` |
 | Support | `evidence`, `constraint`, `assumption`, `rationale`, `risk` |
 | Structural | `start`, `end` |
+| Spec-import (#63) | `claim`, `requirement`, `open_question` |
 
 ---
 

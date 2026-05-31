@@ -43,12 +43,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_roots_scope_root
 CREATE TABLE IF NOT EXISTS nodes (
     id              TEXT PRIMARY KEY,
     session_id      TEXT NOT NULL REFERENCES sessions(id),
-    type            TEXT NOT NULL CHECK (type IN (
-        'question','plan','hypothesis','goal','problem',
-        'answer','action','verification','decision','resolution',
-        'evidence','constraint','assumption','rationale','risk',
-        'start','end'
-    )),
+    type            TEXT NOT NULL,  -- vocabulary enforced in app code via
+                                    -- Storage.NODE_TYPES (#63, v9); no DB CHECK,
+                                    -- mirroring edges.type
     text            TEXT NOT NULL,
     provenance      TEXT NOT NULL DEFAULT 'grounded'
         CHECK (provenance IN ('grounded', 'inferred', 'imported', 'manual')),
@@ -187,4 +184,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_notes_active_anchor_kind
 CREATE INDEX IF NOT EXISTS idx_notes_anchor
     ON notes(session_id, anchor_kind, anchor_id);
 
-PRAGMA user_version = 8;
+PRAGMA user_version = 9;

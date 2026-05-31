@@ -429,8 +429,9 @@ def test_insert_node_rejects_invalid_type_at_storage_layer(tmp_db_path: str) -> 
         root_id="root_a", session_id="ses_1", topic="t",
         now="2026-05-20T10:00:00Z",
     )
-    import sqlite3 as _sqlite3
-    with pytest.raises(_sqlite3.IntegrityError):
+    # #63: after v9 dropped the DB type CHECK, the app-code NODE_TYPES guard is
+    # the sole enforcement and raises ValueError (not sqlite3.IntegrityError).
+    with pytest.raises(ValueError):
         storage.insert_node(
             node_id="bad", session_id="ses_1",
             node_type="bogus_type", text="?",
@@ -2325,7 +2326,7 @@ def test_storage_open_migrates_v2_to_v3_schema(tmp_db_path: str) -> None:
         assert col in node_cols, f"missing nodes.{col}"
     for col in ("scope", "scope_root", "migrated_to_start_id"):
         assert col in root_cols, f"missing roots.{col}"
-    assert version == 8, f"user_version should be 8, got {version}"
+    assert version == 9, f"user_version should be 9, got {version}"
 
 
 def test_storage_open_migrates_v3_to_v4_schema(tmp_db_path: str) -> None:
@@ -2401,7 +2402,7 @@ def test_storage_open_migrates_v3_to_v4_schema(tmp_db_path: str) -> None:
         )
 
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 8, f"expected user_version=8 after migration, got {version}"
+        assert version == 9, f"expected user_version=9 after migration, got {version}"
 
 
 def test_v3_scope_root_requires_non_null_scope(tmp_db_path: str) -> None:
@@ -3080,7 +3081,7 @@ def test_v4_user_version_is_4(tmp_db_path: str) -> None:
     storage = Storage.open(tmp_db_path)
     with storage.connect() as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 8
+    assert version == 9
 
 
 def test_v4_pool_rejected_index_exists(tmp_db_path: str) -> None:
@@ -3154,7 +3155,7 @@ def test_storage_open_migrates_v2_to_v4_schema(tmp_db_path: str) -> None:
         )
 
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 8, f"expected user_version=8 after v2→v8 migration, got {version}"
+        assert version == 9, f"expected user_version=9 after v2→v9 migration, got {version}"
 
 
 def test_open_creates_subgraphs_fts_virtual_table(tmp_db_path: str) -> None:
@@ -3174,7 +3175,7 @@ def test_open_bumps_user_version_to_5(tmp_db_path: str) -> None:
     Storage.open(tmp_db_path)
     with sqlite3.connect(tmp_db_path) as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 8
+    assert version == 9
 
 
 def test_subgraphs_fts_uses_trigram_tokenizer(tmp_db_path: str) -> None:
@@ -3232,7 +3233,7 @@ def test_open_chains_v3_v4_v5_migrations(tmp_db_path: str) -> None:
         names = {row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         )}
-    assert version == 8
+    assert version == 9
     assert "subgraphs_fts" in names
 
 
@@ -3267,7 +3268,7 @@ def test_open_v4_db_runs_v4_to_v5_backfill(tmp_db_path: str) -> None:
         anchor = conn.execute(
             "SELECT anchor_text FROM subgraphs_fts WHERE start_node_id = 'ns'"
         ).fetchone()
-    assert version == 8
+    assert version == 9
     assert anchor is not None and "OPEN-AGAIN" in anchor[0]
 
 

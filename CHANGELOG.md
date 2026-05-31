@@ -7,13 +7,29 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-06-01
+
+### Added
+
+- **Node types `claim` / `requirement` / `open_question`** (#63). The node-type
+  vocabulary grows from 17 to 20 to carry spec-import primitives: a factual /
+  propositional assertion (`claim`), a normative MUST/SHOULD obligation
+  (`requirement`), and a recorded unresolved question that is spec content
+  (`open_question`, distinct from the live decomposition prompt `question`).
+
 ### Changed
 
+- **Node-type enforcement moved from a DB CHECK to `Storage.NODE_TYPES`** (#63,
+  schema v9). The `nodes.type` CHECK is dropped; the vocabulary is validated in
+  app code against the `Storage.NODE_TYPES` frozenset (mirroring `EDGE_TYPES`),
+  so future type additions are frozenset edits, not migrations. An invalid type
+  now raises `ValueError` (was `sqlite3.IntegrityError`). Migration v8→v9 rebuilds
+  the `nodes` table without the CHECK, preserving all rows and indexes.
 - **Version is now single-sourced from `plugin.json`.** `core/server/pyproject.toml`
   no longer hardcodes a second `version` literal — it derives the version from
   `.claude-plugin/plugin.json` (the marketplace manifest) via `[tool.hatch.version]`.
-  No user-facing version change; this removes a drift-prone duplicate. To bump a
-  release, edit `plugin.json` + CHANGELOG only (see [AGENTS.md](AGENTS.md#versioning)).
+  This removes a drift-prone duplicate. To bump a release, edit `plugin.json` +
+  CHANGELOG only (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [0.12.0] — 2026-05-30
 
