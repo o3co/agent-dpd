@@ -4,7 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dpd-mcp-server"
-version = "0.12.0"
+# Version is single-sourced from the plugin manifest (.claude-plugin/plugin.json)
+# — the only version the Claude Code marketplace reads. This package is never
+# published to PyPI (install is editable-local via install.sh) and nothing reads
+# its version at runtime, so duplicating the number here would be dead, drift-prone
+# metadata. See [tool.hatch.version] below. NOTE: because the version source lives
+# two levels up, `core/server/` is NOT independently buildable — building it
+# requires the sibling `../../.claude-plugin/plugin.json` to be present.
+dynamic = ["version"]
 description = "DPD MCP server: graph state + sqlite storage over stdio."
 requires-python = ">=3.11"
 dependencies = [
@@ -21,6 +28,15 @@ dev = [
 
 [project.scripts]
 dpd-mcp-server = "dpd_mcp_server.server:cli"
+
+[tool.hatch.version]
+# Derive the version from the plugin manifest two levels up (the marketplace SoT).
+# path is relative to this pyproject's directory (core/server/).
+# The pattern anchors to a top-level, 2-space-indented "version" key (the manifest
+# format) so a future nested "version" key elsewhere in the JSON can't be matched first.
+source = "regex"
+path = "../../.claude-plugin/plugin.json"
+pattern = '(?m)^  "version":\s*"(?P<version>[^"]+)"'
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dpd_mcp_server"]
