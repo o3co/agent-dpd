@@ -54,13 +54,15 @@ class Storage:
             then migrate_v5_to_v6 (ALTER TABLE: nodes.severity),
             then migrate_v6_to_v7 (ALTER TABLE: edges.layer +
             verification_priority; CREATE edge_verifications),
-            then migrate_v7_to_v8 (CREATE notes + partial unique index).
-          - user_version = 3: run v3→v4, v4→v5, v5→v6, v6→v7, v7→v8.
-          - user_version = 4: run v4→v5, v5→v6, v6→v7, v7→v8.
-          - user_version = 5: run v5→v6, v6→v7, v7→v8.
-          - user_version = 6: run v6→v7, v7→v8.
-          - user_version = 7: run v7→v8 only.
-          - user_version >= 8: no migration needed; schema.sql is applied
+            then migrate_v7_to_v8 (CREATE notes + partial unique index),
+            then migrate_v8_to_v9 (rebuild nodes WITHOUT the type CHECK).
+          - user_version = 3: run v3→v4, v4→v5, v5→v6, v6→v7, v7→v8, v8→v9.
+          - user_version = 4: run v4→v5, v5→v6, v6→v7, v7→v8, v8→v9.
+          - user_version = 5: run v5→v6, v6→v7, v7→v8, v8→v9.
+          - user_version = 6: run v6→v7, v7→v8, v8→v9.
+          - user_version = 7: run v7→v8, v8→v9.
+          - user_version = 8: run v8→v9 only.
+          - user_version >= 9: no migration needed; schema.sql is applied
             (CREATE TABLE IF NOT EXISTS is idempotent).
 
         SQLite limitation: ALTER TABLE cannot add CHECK constraints, so the
@@ -74,6 +76,7 @@ class Storage:
         from .migrate_v5_to_v6 import migrate as _migrate_v5_to_v6
         from .migrate_v6_to_v7 import migrate as _migrate_v6_to_v7
         from .migrate_v7_to_v8 import migrate as _migrate_v7_to_v8
+        from .migrate_v8_to_v9 import migrate as _migrate_v8_to_v9
 
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -115,26 +118,34 @@ class Storage:
             _migrate_v5_to_v6(db_path=db_path)
             _migrate_v6_to_v7(db_path=db_path)
             _migrate_v7_to_v8(db_path=db_path)
+            _migrate_v8_to_v9(db_path=db_path)
         elif pre_schema_version == 3:
             _migrate_v3_to_v4(db_path=db_path)
             _migrate_v4_to_v5(db_path=db_path)
             _migrate_v5_to_v6(db_path=db_path)
             _migrate_v6_to_v7(db_path=db_path)
             _migrate_v7_to_v8(db_path=db_path)
+            _migrate_v8_to_v9(db_path=db_path)
         elif pre_schema_version == 4:
             _migrate_v4_to_v5(db_path=db_path)
             _migrate_v5_to_v6(db_path=db_path)
             _migrate_v6_to_v7(db_path=db_path)
             _migrate_v7_to_v8(db_path=db_path)
+            _migrate_v8_to_v9(db_path=db_path)
         elif pre_schema_version == 5:
             _migrate_v5_to_v6(db_path=db_path)
             _migrate_v6_to_v7(db_path=db_path)
             _migrate_v7_to_v8(db_path=db_path)
+            _migrate_v8_to_v9(db_path=db_path)
         elif pre_schema_version == 6:
             _migrate_v6_to_v7(db_path=db_path)
             _migrate_v7_to_v8(db_path=db_path)
+            _migrate_v8_to_v9(db_path=db_path)
         elif pre_schema_version == 7:
             _migrate_v7_to_v8(db_path=db_path)
+            _migrate_v8_to_v9(db_path=db_path)
+        elif pre_schema_version == 8:
+            _migrate_v8_to_v9(db_path=db_path)
 
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 5000")
@@ -520,6 +531,7 @@ class Storage:
         parent_kind: str,
         now: str,
     ) -> None:
+        self._check_node_type(node_type)
         with self.connect() as conn:
             conn.execute(
                 """
@@ -555,6 +567,7 @@ class Storage:
         provenance and state are validated by DB CHECK constraints; invalid
         values cause sqlite3.IntegrityError which propagates to the caller.
         """
+        self._check_node_type(node_type)
         with self.connect() as conn:
             if conn.execute(
                 "SELECT 1 FROM roots WHERE session_id = ? AND id = ?",
@@ -730,6 +743,41 @@ class Storage:
                 rows = [n for n in rows if n["type"] == node_type]
             rows.sort(key=lambda r: r["rowid"])
             return seek_and_limit(rows, after_rowid=after_rowid, limit=limit)
+
+    # The node-type vocabulary. Public contract for the `type` values a node may
+    # carry — consumers validate against this, never against a DB CHECK. Mirrors
+    # EDGE_TYPES: enforcement is app-code (see _check_node_type and the insert
+    # paths), so adding a type is a frozenset edit, not a schema migration. Schema
+    # v9 (#63) dropped the nodes.type CHECK in favor of this.
+    NODE_TYPES = frozenset({
+        "question", "plan", "hypothesis", "goal", "problem",
+        "answer", "action", "verification", "decision", "resolution",
+        "evidence", "constraint", "assumption", "rationale", "risk",
+        "start", "end",
+        # #63 spec-import primitives:
+        #   claim         — a propositional/factual assertion that IS spec content
+        #   requirement   — a normative MUST/SHOULD obligation
+        #   open_question — a recorded unresolved question (spec record, not a
+        #                   live decomposition prompt)
+        "claim", "requirement", "open_question",
+    })
+
+    @classmethod
+    def _check_node_type(cls, node_type: str) -> None:
+        """Validate a caller-supplied node type against ``NODE_TYPES``.
+
+        Raises ``ValueError`` (same shape as ``add_edge``'s vocabulary check).
+        After schema v9 dropped the DB CHECK, this is the sole node-type
+        enforcement, so every caller-supplied-type insert path must call it.
+        Fixed-literal insert paths (``resolve_branch`` /
+        ``resolve_hypothesis_branch``) do not call it — their literals are
+        instead pinned to ``NODE_TYPES`` by a drift-guard test.
+        """
+        if node_type not in cls.NODE_TYPES:
+            raise ValueError(
+                f"node_type {node_type!r} not in canonical vocabulary "
+                f"{sorted(cls.NODE_TYPES)}"
+            )
 
     EDGE_TYPES = frozenset({
         "derived_from", "requires", "blocks", "supports", "contradicts",
@@ -1477,6 +1525,10 @@ class Storage:
 
     _BODY_TYPES = frozenset({
         "decision", "resolution", "answer", "rationale", "evidence",
+        # #63: claim/requirement are spec-content assertions (close to
+        # evidence/rationale), so their text feeds body_text for FTS ranking.
+        # open_question stays out — it is a journey-flavored open prompt.
+        "claim", "requirement",
     })
 
     def _reindex_subgraph(self, *, start_node_id: str) -> None:
@@ -1972,6 +2024,7 @@ class Storage:
         provenance and state are validated by DB CHECK constraints; invalid
         values cause sqlite3.IntegrityError which propagates to the caller.
         """
+        self._check_node_type(node_type)
         if node_type == "end" and not paired_for:
             raise ValueError("End nodes require paired_for (= paired Start id)")
         with self.connect() as conn:
@@ -2521,6 +2574,9 @@ class Storage:
                     f"bulk_import: duplicate node id {nid!r} in import set"
                 )
             seen_ids.add(nid)
+            # #63: validate node type pre-flight (sole enforcement after v9
+            # dropped the DB CHECK), so an invalid type fails before any insert.
+            self._check_node_type(node["type"])
 
         import_ids: set[str] = {n["id"] for n in nodes}
         node_map: dict[str, dict] = {n["id"]: n for n in nodes}

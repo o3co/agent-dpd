@@ -93,7 +93,7 @@ def test_export_sql_carries_pragma_and_manifest(tmp_db_path: str) -> None:
 
     sql = storage.export_sql(now=NOW, exported_by="tester")
 
-    assert "PRAGMA user_version = 8;" in sql
+    assert "PRAGMA user_version = 9;" in sql
     assert "CREATE TABLE export_meta" in sql
     assert "tester" in sql
     # Manifest summarizes origin.
@@ -148,7 +148,7 @@ def test_roundtrip_restore_via_migrate(tmp_db_path: str, tmp_path) -> None:
 
     # The freshly-restored DB carries the origin schema version but no FTS index.
     with sqlite3.connect(restored_path) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
 
     migrate_mod.migrate(db_path=restored_path)
 
@@ -193,7 +193,7 @@ def test_migrate_forward_ports_older_schema(tmp_db_path: str) -> None:
         }
         version = conn.execute("PRAGMA user_version").fetchone()[0]
     assert "notes" in names
-    assert version == 8
+    assert version == 9
 
 
 def test_migrate_rejects_newer_schema(tmp_db_path: str) -> None:
@@ -230,7 +230,7 @@ def test_export_sql_tool_returns_text_and_size(tmp_db_path: str) -> None:
 
     result = export_sql_tool(storage=storage, arguments={}, now=NOW)
 
-    assert "PRAGMA user_version = 8;" in result["sql"]
+    assert "PRAGMA user_version = 9;" in result["sql"]
     assert result["bytes"] == len(result["sql"].encode("utf-8"))
 
 

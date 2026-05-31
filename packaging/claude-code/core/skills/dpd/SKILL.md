@@ -544,13 +544,15 @@ The supersedes path for option (i) preserves state machine monotonicity (`active
 
 ## Node type vocabulary (spec §2.2)
 
-The server enforces these via CHECK constraint:
+The server validates these against the canonical `NODE_TYPES` vocabulary
+(app-code enforcement, not a DB CHECK — #63 / schema v9, mirroring edge types):
 
 | Side | Examples |
 |---|---|
 | **Problem (open-flavor)** | `question`, `plan`, `hypothesis`, `goal`, `problem` |
 | **Solution (close-flavor)** | `answer`, `action`, `verification`, `decision`, `resolution` |
 | **Support** | `evidence`, `constraint`, `assumption`, `rationale`, `risk` |
+| **Spec-import (#63)** | `claim` (factual/propositional assertion), `requirement` (normative MUST/SHOULD), `open_question` (recorded unresolved question, vs the live decomposition prompt `question`) |
 
 Special structural types: `start`, `end` (subgraph anchors).
 

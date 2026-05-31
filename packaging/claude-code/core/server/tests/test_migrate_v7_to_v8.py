@@ -60,7 +60,7 @@ def test_migrate_is_idempotent(tmp_path: Path) -> None:
 
     with sqlite3.connect(db_path) as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 8
+    assert version == 9
 
 
 def test_migrate_preserves_existing_rows(tmp_path: Path) -> None:
