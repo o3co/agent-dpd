@@ -7,6 +7,14 @@ changes on every MINOR bump until `1.0` (see [AGENTS.md](AGENTS.md#versioning)).
 
 ## [Unreleased]
 
+### Changed
+
+- **Version is now single-sourced from `plugin.json`.** `core/server/pyproject.toml`
+  no longer hardcodes a second `version` literal — it derives the version from
+  `.claude-plugin/plugin.json` (the marketplace manifest) via `[tool.hatch.version]`.
+  No user-facing version change; this removes a drift-prone duplicate. To bump a
+  release, edit `plugin.json` + CHANGELOG only (see [AGENTS.md](AGENTS.md#versioning)).
+
 ## [0.12.0] — 2026-05-30
 
 ### Added

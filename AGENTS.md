@@ -138,4 +138,8 @@ A `.dpdrc` is a single-line marker (`scope=<name>` or empty for agent-scope-only
 
 Currently `0.x` — minor version bumps freely, breaking changes allowed without a major bump until `1.0`. New features land on `main` after review; no long-lived feature branches.
 
+**The version lives in exactly one place: `packaging/claude-code/.claude-plugin/plugin.json`** — the manifest the marketplace reads. `core/server/pyproject.toml` *derives* its version from there at build time (`[tool.hatch.version]` regex on the manifest), and the package is never published to PyPI (install is editable-local), so do **not** add a hardcoded `version` back to `pyproject.toml`. To bump: edit `plugin.json` `version` and add a `CHANGELOG.md` entry — that's the whole lockstep.
+
+Two consequences of the out-of-tree version source: (1) `core/server/` is **not independently buildable** — a build needs the sibling `../../.claude-plugin/plugin.json`. (2) The session-start hook hashes **both** `pyproject.toml` and `plugin.json` to decide when to reinstall the cached venv, so a version-only bump still re-points the editable install.
+
 `1.0` will lock the public API surface (MCP tool names + args, `.dpdrc` schema, sqlite schema migration path). Don't promise stability before then.

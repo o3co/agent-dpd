@@ -9,18 +9,30 @@ trap 'rm -rf "$TMPDIR"' EXIT
 export CLAUDE_PLUGIN_DATA="$TMPDIR/data"
 export CLAUDE_PLUGIN_ROOT="$TMPDIR/root"
 
-# Fake plugin root with a minimal core/server (just pyproject.toml as marker for hash)
+# Fake plugin root mirroring the real layout: pyproject derives its version from
+# .claude-plugin/plugin.json (the marketplace SoT), so the hook must hash both.
 mkdir -p "$CLAUDE_PLUGIN_ROOT/core/server/src/dpd_mcp_server"
+mkdir -p "$CLAUDE_PLUGIN_ROOT/.claude-plugin"
+cat > "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json" <<'EOF'
+{
+  "name": "dpd",
+  "version": "0.4.0"
+}
+EOF
 cat > "$CLAUDE_PLUGIN_ROOT/core/server/pyproject.toml" <<'EOF'
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 [project]
 name = "dpd-mcp-server"
-version = "0.4.0"
+dynamic = ["version"]
 requires-python = ">=3.11"
 [project.scripts]
 dpd-mcp-server = "dpd_mcp_server:noop"
+[tool.hatch.version]
+source = "regex"
+path = "../../.claude-plugin/plugin.json"
+pattern = '(?m)^  "version":\s*"(?P<version>[^"]+)"'
 [tool.hatch.build.targets.wheel]
 packages = ["src/dpd_mcp_server"]
 EOF
@@ -45,26 +57,28 @@ HASH2=$(cat "$CLAUDE_PLUGIN_DATA/.venv/.requirements-hash")
 [ "$HASH1" = "$HASH2" ] || { echo "FAIL: hash changed across identical runs"; exit 1; }
 echo "OK: idempotent on identical state"
 
-# Test 3: changing pyproject.toml triggers reinstall (hash advances AND pip
-# actually processes the new pyproject — not just a hash-file rewrite).
-# Use a version bump because pip's installed dist-info directory is named
-# `<name>-<version>.dist-info` and renames atomically on reinstall — that's
-# direct evidence pip ran, regardless of pip's wrapper-rewrite optimizations.
+# Test 3: a version-only release (bumping ONLY plugin.json, the version SoT)
+# triggers reinstall. Regression guard for the derived-version setup: pyproject.toml
+# stays byte-identical, so the hook's hash MUST include plugin.json or it would
+# fast-exit and leave the editable install on the previous plugin-cache version.
+# We assert the dist-info dir renames — pip's installed dir is `<name>-<version>.dist-info`
+# and renames atomically on reinstall, which is direct evidence pip ran AND that the
+# derived version flowed from plugin.json through the build.
 # `|| true` guards against `set -euo pipefail` killing the script when grep finds
 # no match — we want the explicit FAIL diagnostic below to fire instead.
 DIST_BEFORE=$(ls "$CLAUDE_PLUGIN_DATA/.venv/lib"/python*/site-packages/ 2>/dev/null | grep -oE 'dpd_mcp_server-[0-9.]+\.dist-info' | head -1 || true)
 [ -n "$DIST_BEFORE" ] || { echo "FAIL: dist-info dir missing after Test 1/2 — pip never ran?"; exit 1; }
-# Cross-platform in-place edit (macOS sed wants -i '', GNU sed wants -i alone);
-# `-i.bak` with explicit suffix removal works on both.
-sed -i.bak 's/version = "0.4.0"/version = "0.4.1"/' "$CLAUDE_PLUGIN_ROOT/core/server/pyproject.toml"
-rm -f "$CLAUDE_PLUGIN_ROOT/core/server/pyproject.toml.bak"
+# Bump ONLY plugin.json (pyproject.toml is untouched). Cross-platform in-place edit
+# (macOS sed wants -i '', GNU sed wants -i alone); `-i.bak` + suffix removal works on both.
+sed -i.bak 's/"version": "0.4.0"/"version": "0.4.1"/' "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json"
+rm -f "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json.bak"
 "$HOOK"
 HASH3=$(cat "$CLAUDE_PLUGIN_DATA/.venv/.requirements-hash")
-[ "$HASH3" != "$HASH2" ] || { echo "FAIL: hash unchanged after pyproject.toml edit"; exit 1; }
+[ "$HASH3" != "$HASH2" ] || { echo "FAIL: hash unchanged after plugin.json version bump — a version-only release would skip reinstall"; exit 1; }
 DIST_AFTER=$(ls "$CLAUDE_PLUGIN_DATA/.venv/lib"/python*/site-packages/ 2>/dev/null | grep -oE 'dpd_mcp_server-[0-9.]+\.dist-info' | head -1 || true)
 [ "$DIST_AFTER" = "dpd_mcp_server-0.4.1.dist-info" ] \
-  || { echo "FAIL: dist-info did not reflect version bump (was: $DIST_BEFORE, now: $DIST_AFTER) — pip didn't actually run"; exit 1; }
-echo "OK: pyproject.toml change triggers reinstall (hash + dist-info both advanced)"
+  || { echo "FAIL: dist-info did not reflect the plugin.json bump (was: $DIST_BEFORE, now: $DIST_AFTER) — derived version did not flow through reinstall"; exit 1; }
+echo "OK: plugin.json version bump triggers reinstall (hash + derived dist-info both advanced)"
 
 # Test 4: actual packaging/claude-code/ layout resolves core/server/pyproject.toml
 # (regression guard for the marketplace install layout — symlink dereference at install

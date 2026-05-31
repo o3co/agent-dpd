@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # DPD plugin session-start hook: lazy-bootstrap a venv at ${CLAUDE_PLUGIN_DATA}/.venv
 # with the dpd-mcp-server package installed. Idempotent: only reinstalls when
-# core/server/pyproject.toml hash changes.
+# the hash of core/server/pyproject.toml + .claude-plugin/plugin.json changes.
+# plugin.json is included because it carries the package version (pyproject derives
+# it via [tool.hatch.version]), so a version-only release — which bumps ONLY
+# plugin.json — must still invalidate the cached editable install.
 
 set -euo pipefail
 
@@ -11,19 +14,27 @@ set -euo pipefail
 VENV="$CLAUDE_PLUGIN_DATA/.venv"
 SERVER_SRC="$CLAUDE_PLUGIN_ROOT/core/server"
 PYPROJECT="$SERVER_SRC/pyproject.toml"
+PLUGIN_JSON="$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json"
 HASH_FILE="$VENV/.requirements-hash"
 
 if [ ! -f "$PYPROJECT" ]; then
   echo "session-start.sh: ERROR: $PYPROJECT not found" >&2
   exit 1
 fi
+if [ ! -f "$PLUGIN_JSON" ]; then
+  echo "session-start.sh: ERROR: $PLUGIN_JSON not found" >&2
+  exit 1
+fi
 
-# Compute hash of pyproject.toml (the dependency source of truth)
+# Compute a combined hash of pyproject.toml (dependencies) + plugin.json (the
+# version source of truth). A version-only release bumps ONLY plugin.json, so it
+# must be in the hash or the quick-exit below would skip the reinstall and leave
+# the editable install pointing at the previous plugin-cache version dir.
 # shasum is macOS-native; sha256sum is Linux. Try both.
 if command -v shasum >/dev/null 2>&1; then
-  CURRENT_HASH=$(shasum -a 256 "$PYPROJECT" | awk '{print $1}')
+  CURRENT_HASH=$(cat "$PYPROJECT" "$PLUGIN_JSON" | shasum -a 256 | awk '{print $1}')
 elif command -v sha256sum >/dev/null 2>&1; then
-  CURRENT_HASH=$(sha256sum "$PYPROJECT" | awk '{print $1}')
+  CURRENT_HASH=$(cat "$PYPROJECT" "$PLUGIN_JSON" | sha256sum | awk '{print $1}')
 else
   echo "session-start.sh: ERROR: neither shasum nor sha256sum found in PATH" >&2
   exit 1
